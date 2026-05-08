@@ -1,10 +1,10 @@
 # tenant-runtime-poc
 
-A deterministic staged pipeline runtime engine for tenant-specific state machines, exposed as a control plane API for platform integration.
+A deterministic staged pipeline runtime engine for tenant-specific state machines, with true control plane/execution plane separation for production scalability.
 
 ## Architecture
 
-This project implements a **tenant-driven execution platform** with three layers:
+This project implements a **tenant-driven execution platform** with four layers:
 
 ### 1. Execution Kernel
 Pipeline-based execution model:
@@ -18,10 +18,35 @@ INGEST → EVALUATE → PLAN → EXECUTE → APPLY → EMIT
 - **ReplayEngine**: Safe execution replay
 - **SimulationEngine**: Model change simulation
 
-### 3. Control Plane API Layer (NEW)
+### 3. Control Plane / Execution Plane Separation (NEW)
+
+True separation between ingestion and execution:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                 Control Plane                       │
+│                                                     │
+│  ControlPlaneServer → ExecutionQueue.enqueue()     │
+│  (POST /events)              ↓                      │
+└────────────────────────────────────────────────────┘
+                               │
+┌────────────────────────────────────────────────────┐
+│                 Execution Plane                     │
+│                               ↓                     │
+│  RuntimeWorker.dequeue() → RuntimeEngine.ingest()  │
+│                                                     │
+└────────────────────────────────────────────────────┘
+```
+
+**Components:**
+- **ExecutionQueue**: Decouples control plane from execution plane
+- **RuntimeWorker**: Execution plane that processes events from queue
+- **ControlPlaneServer**: API layer that enqueues events
+
+### 4. Control Plane API Layer
 - **TenantRuntimeRegistry**: Multi-tenant model management
 - **ControlPlaneServer**: HTTP API for external systems
-  - `POST /events` - Ingest events
+  - `POST /events` - Ingest events (enqueues for async processing)
   - `GET /executions` - Query executions
   - `GET /executions/:id` - Inspect execution
   - `POST /simulate` - Simulate execution
@@ -30,6 +55,9 @@ See [src/runtime/README.md](src/runtime/README.md) for kernel architecture and [
 
 ## Key Features
 
+- **Control/Execution Plane Separation**: True architectural split for production scalability
+- **ExecutionQueue**: Async event processing with worker isolation
+- **RuntimeWorker**: Independent execution plane with worker pool support
 - **ExecutionContext**: Core abstraction carrying runtime state through pipeline stages
 - **Pipeline Stages**: Six isolated stages for event processing
 - **State Machine**: Tenant-specific state transitions with action execution
@@ -90,14 +118,18 @@ The runtime will process the event through the pipeline, execute any actions, up
 ### Control Plane API Usage
 
 ```typescript
-// Setup registry and server
+// Setup registry, queue, and worker
 const registry = new TenantRuntimeRegistry()
 registry.register('demo', demoTenant)
 
-const server = new ControlPlaneServer(registry, engines, query, inspector)
+const executionQueue = new ExecutionQueue()
+const worker = new RuntimeWorker(executionQueue, engines)
+worker.start()
+
+const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
 await server.start(3000)
 
-// Ingest events via API
+// Ingest events via API (enqueued for async processing)
 await fetch('http://localhost:3000/events', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },

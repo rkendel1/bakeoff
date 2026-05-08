@@ -6,6 +6,7 @@ import type { RuntimeInspector } from '../control-plane/inspector.js'
 import type { TenantRuntimeRegistry } from '../registry/tenant-registry.js'
 import type { ExecutionRecord } from '../store/execution-record.js'
 import { simulate } from '../simulate/simulation-engine.js'
+import type { ExecutionQueue } from '../queue/execution-queue.js'
 
 /**
  * ControlPlaneServer - HTTP API server for the runtime control plane
@@ -17,6 +18,11 @@ import { simulate } from '../simulate/simulation-engine.js'
  * - Simulations can be triggered externally
  * 
  * This is the bridge between engine internals → your platform
+ * 
+ * Architecture:
+ * - Control Plane (this server): Receives events and enqueues them
+ * - Execution Queue: Decouples ingestion from execution
+ * - Execution Plane (RuntimeWorker): Processes events from queue
  */
 export class ControlPlaneServer {
   private server: http.Server
@@ -25,7 +31,8 @@ export class ControlPlaneServer {
     private readonly registry: TenantRuntimeRegistry,
     private readonly engines: Map<string, RuntimeEngine>,
     private readonly executionQuery: ExecutionQuery,
-    private readonly inspector: RuntimeInspector
+    private readonly inspector: RuntimeInspector,
+    private readonly executionQueue: ExecutionQueue
   ) {
     this.server = http.createServer(this.handleRequest.bind(this))
   }
@@ -111,6 +118,10 @@ export class ControlPlaneServer {
    *   "type": "document.uploaded",
    *   "payload": {}
    * }
+   * 
+   * Architecture:
+   * - Control Plane: Validates and enqueues event
+   * - Execution Plane: Worker picks up and processes event
    */
   private async handleIngestEvent(
     req: http.IncomingMessage,
@@ -138,7 +149,7 @@ export class ControlPlaneServer {
       return
     }
 
-    // Get or create engine for tenant
+    // Validate engine exists for tenant
     const engine = this.engines.get(event.tenantId)
     if (!engine) {
       res.writeHead(500, { 'Content-Type': 'application/json' })
@@ -146,8 +157,8 @@ export class ControlPlaneServer {
       return
     }
 
-    // Ingest event
-    await engine.ingest(event)
+    // Enqueue event for asynchronous processing by worker
+    this.executionQueue.enqueue(event)
 
     res.writeHead(202, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ status: 'accepted', event }))
