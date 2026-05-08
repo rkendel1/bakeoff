@@ -1,10 +1,19 @@
 import type { RuntimeEvent } from '../models/event.js'
 import type { TenantModel } from '../models/tenant-model.js'
+import type { ExecutionContext } from './context/execution-context.js'
 import { EventStore } from '../store/event-store.js'
 import { StateStore } from '../store/state-store.js'
-import { evaluateTransition } from './evaluator.js'
 import { Executor } from './executor.js'
 import { Dispatcher } from './dispatcher.js'
+import { pipe } from './pipeline/pipe.js'
+import {
+  createIngestStage,
+  createEvaluateStage,
+  createPlanStage,
+  createExecuteStage,
+  createApplyStage,
+  createEmitStage
+} from './pipeline/stages.js'
 
 export class RuntimeEngine {
   constructor(
@@ -25,52 +34,36 @@ export class RuntimeEngine {
         continue
       }
 
-      console.log('[runtime] event received', { type: currentEvent.type, entityId: currentEvent.entityId })
+      const ctx = this.createContext(currentEvent)
 
-      this.eventStore.append(currentEvent)
+      const result = await pipe(ctx, [
+        createIngestStage(this.eventStore),
+        createEvaluateStage(this.stateStore, this.initialState),
+        createPlanStage(),
+        createExecuteStage(this.executor),
+        createApplyStage(this.stateStore),
+        createEmitStage()
+      ])
 
-      const currentState = this.stateStore.get(currentEvent.entityId) ?? this.initialState
-      const transition = evaluateTransition({
-        model: this.model,
-        event: currentEvent,
-        currentState
-      })
-
-      if (!transition) {
-        console.log('[runtime] transition matched', { matched: false, state: currentState, event: currentEvent.type })
-        continue
-      }
-
-      console.log('[runtime] transition matched', {
-        matched: true,
-        fromState: transition.fromState,
-        toState: transition.toState,
-        event: transition.eventType
-      })
-
-      const followUpEvents = await this.executor.execute({
-        model: this.model,
-        actionNames: transition.actions,
-        event: currentEvent
-      })
-
-      this.stateStore.set(currentEvent.entityId, transition.toState)
-      this.stateStore.appendHistory({
-        entityId: currentEvent.entityId,
-        fromState: transition.fromState,
-        toState: transition.toState,
-        eventType: currentEvent.type,
-        timestamp: new Date().toISOString()
-      })
-
-      console.log('[runtime] state updated', {
-        entityId: currentEvent.entityId,
-        state: transition.toState
-      })
-
-      for (const followUpEvent of followUpEvents) {
+      for (const followUpEvent of result.emittedEvents) {
         this.dispatcher.enqueue(followUpEvent)
       }
+    }
+  }
+
+  private createContext(event: RuntimeEvent): ExecutionContext {
+    return {
+      tenantId: event.tenantId,
+      entityId: event.entityId,
+      entityType: event.entityType,
+      event,
+      model: this.model,
+      currentState: '',
+      transitions: [],
+      plannedActions: [],
+      emittedEvents: [],
+      stateUpdates: [],
+      trace: []
     }
   }
 }
