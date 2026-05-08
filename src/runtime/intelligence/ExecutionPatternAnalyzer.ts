@@ -77,18 +77,14 @@ export class ExecutionPatternAnalyzer {
    */
   private extractPath(execution: ExecutionRecord): string[] {
     const path: string[] = []
-    const trace = execution.contextSnapshot.trace
+    const stateUpdates = execution.contextSnapshot.stateUpdates
 
-    for (const entry of trace) {
-      if (entry.stage === 'APPLY' && entry.context.stateUpdates) {
-        for (const update of entry.context.stateUpdates) {
-          // Add states to path
-          if (path.length === 0 || path[path.length - 1] !== update.fromState) {
-            path.push(update.fromState)
-          }
-          path.push(update.toState)
-        }
+    for (const update of stateUpdates) {
+      // Add states to path
+      if (path.length === 0 || path[path.length - 1] !== update.fromState) {
+        path.push(update.fromState)
       }
+      path.push(update.toState)
     }
 
     return path

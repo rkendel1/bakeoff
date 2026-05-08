@@ -168,20 +168,16 @@ export class DriftFromCanonicalAnalyzer {
     // Build map of actual provider usage
     const actualProviders = new Map<string, Map<string, number>>()
     for (const execution of executions) {
-      const trace = execution.contextSnapshot.trace
-      for (const entry of trace) {
-        if (entry.stage === 'EXECUTE' && entry.context.plannedActions) {
-          for (const action of entry.context.plannedActions) {
-            if (!actualProviders.has(action.name)) {
-              actualProviders.set(action.name, new Map())
-            }
-            const providerCounts = actualProviders.get(action.name)!
-            providerCounts.set(
-              action.provider,
-              (providerCounts.get(action.provider) || 0) + 1
-            )
-          }
+      const plannedActions = execution.contextSnapshot.plannedActions
+      for (const action of plannedActions) {
+        if (!actualProviders.has(action.name)) {
+          actualProviders.set(action.name, new Map())
         }
+        const providerCounts = actualProviders.get(action.name)!
+        providerCounts.set(
+          action.provider,
+          (providerCounts.get(action.provider) || 0) + 1
+        )
       }
     }
 

@@ -23,40 +23,36 @@ export class CanonicalTransitionGraph {
     this.transitions.clear()
 
     for (const execution of executions) {
-      const trace = execution.contextSnapshot.trace
+      const stateUpdates = execution.contextSnapshot.stateUpdates
+      const isSuccess = execution.status === 'completed'
 
-      // Extract state transitions from execution trace
-      for (const entry of trace) {
-        if (entry.stage === 'APPLY' && entry.context.stateUpdates) {
-          for (const update of entry.context.stateUpdates) {
-            const key = this.makeKey(
-              update.fromState,
-              update.toState,
-              execution.event.type
-            )
+      // Extract state transitions from execution context
+      for (const update of stateUpdates) {
+        const key = this.makeKey(
+          update.fromState,
+          update.toState,
+          execution.event.type
+        )
 
-            const existing = this.transitions.get(key)
-            const isSuccess = execution.status === 'completed'
+        const existing = this.transitions.get(key)
 
-            if (existing) {
-              existing.count++
-              if (isSuccess) {
-                existing.successCount++
-              } else {
-                existing.failureCount++
-              }
-            } else {
-              this.transitions.set(key, {
-                from: update.fromState,
-                to: update.toState,
-                eventType: execution.event.type,
-                weight: 0, // Will be calculated later
-                count: 1,
-                successCount: isSuccess ? 1 : 0,
-                failureCount: isSuccess ? 0 : 1
-              })
-            }
+        if (existing) {
+          existing.count++
+          if (isSuccess) {
+            existing.successCount++
+          } else {
+            existing.failureCount++
           }
+        } else {
+          this.transitions.set(key, {
+            from: update.fromState,
+            to: update.toState,
+            eventType: execution.event.type,
+            weight: 0, // Will be calculated later
+            count: 1,
+            successCount: isSuccess ? 1 : 0,
+            failureCount: isSuccess ? 0 : 1
+          })
         }
       }
     }
