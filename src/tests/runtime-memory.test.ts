@@ -193,7 +193,7 @@ test('StrategyEffectivenessAnalyzer: recommends best strategy', async () => {
   
   assert.ok(recommendation)
   assert.equal(recommendation.strategy, 'reroute:a->b')
-  assert.ok(recommendation.effectivenessScore > 0.5)  // Adjusted for weighted average calculation
+  assert.ok(recommendation.effectivenessScore > 0.5)
   assert.ok(recommendation.confidence === 0.6)  // 10 samples gives 0.6 confidence
 })
 
@@ -277,7 +277,7 @@ test('MemoryInformedGovernanceEngine: enhances policy decision with memory', asy
   
   assert.ok(decision.memoryInformed)
   assert.ok(decision.memoryInformed.recommendedStrategy)
-  assert.ok(decision.memoryInformed.effectiveness! > 0.5)  // Adjusted for weighted average calculation
+  assert.ok(decision.memoryInformed.effectiveness! > 0.5)
   assert.ok(decision.memoryInformed.confidence! === 0.8)  // 25 samples gives 0.8 confidence
   assert.ok(decision.rationale.some(r => r.includes('[LEARNED]')))
 })

@@ -29,6 +29,9 @@ export class StrategyEffectivenessAnalyzer {
   
   // Decline detection threshold
   private static readonly DECLINE_THRESHOLD = 0.15
+  
+  // Minimum records needed for decline detection
+  private static readonly MIN_RECORDS_FOR_DECLINE_DETECTION = 10
 
   constructor(private readonly memoryStore: RuntimeMemoryStore) {}
 
@@ -361,7 +364,9 @@ export class StrategyEffectivenessAnalyzer {
     const declining: string[] = []
 
     for (const [strategy, groupRecords] of strategyGroups) {
-      if (groupRecords.length < 10) continue  // Need enough data
+      if (groupRecords.length < StrategyEffectivenessAnalyzer.MIN_RECORDS_FOR_DECLINE_DETECTION) {
+        continue  // Need enough data
+      }
 
       // Sort by time
       const sorted = [...groupRecords].sort(

@@ -32,6 +32,9 @@ export class RuntimeMemoryStore {
   
   // Trend detection threshold
   private static readonly TREND_CHANGE_THRESHOLD = 0.1
+  
+  // Minimum records needed for trend analysis
+  private static readonly MIN_RECORDS_FOR_TREND_ANALYSIS = 4
 
   private readonly records = new Map<string, RuntimeMemoryRecord>()
   private readonly tenantIndex = new Map<string, string[]>()
@@ -236,7 +239,9 @@ export class RuntimeMemoryStore {
   private calculateTrend(
     records: RuntimeMemoryRecord[]
   ): 'improving' | 'stable' | 'declining' {
-    if (records.length < 4) return 'stable'
+    if (records.length < RuntimeMemoryStore.MIN_RECORDS_FOR_TREND_ANALYSIS) {
+      return 'stable'
+    }
 
     const sorted = [...records].sort(
       (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
