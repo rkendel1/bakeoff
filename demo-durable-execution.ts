@@ -150,8 +150,8 @@ const worker3a = new RuntimeWorker(queue, engines3, 50)
 worker3a.start()
 console.log(`✓ Worker started`)
 
-// Simulate crash - stop worker immediately
-await new Promise(resolve => setTimeout(resolve, 10))
+// Simulate crash - stop worker after brief startup
+await new Promise(resolve => setTimeout(resolve, 50))
 worker3a.stop()
 console.log(`✗ Worker crashed/stopped`)
 console.log(`  Queue size: ${queue.size()}`)

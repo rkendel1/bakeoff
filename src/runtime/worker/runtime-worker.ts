@@ -99,7 +99,11 @@ export class RuntimeWorker {
             const error = `No engine found for tenant: ${job.event.tenantId}`
             console.error('[worker]', error)
             this.queue.fail(job.id, error)
-            // Don't retry if engine doesn't exist - this is a configuration error
+            // Don't retry configuration errors - send directly to DLQ
+            // This requires manual intervention to fix
+            const dlq = this.queue.getDeadLetterQueue()
+            dlq.add(job.event, error, job.attempts)
+            this.queue.ack(job.id) // Remove from queue since it's in DLQ
             continue
           }
 
