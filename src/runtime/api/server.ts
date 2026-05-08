@@ -329,6 +329,13 @@ export class ControlPlaneServer {
     const pathname = url.pathname
 
     try {
+      // Health check endpoint
+      if (req.method === 'GET' && pathname === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, service: 'bakeoff-runtime-core' }))
+        return
+      }
+      
       // Route requests
       if (req.method === 'POST' && pathname === '/events') {
         await this.handleIngestEvent(req, res)
