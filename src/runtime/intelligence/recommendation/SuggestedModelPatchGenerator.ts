@@ -80,7 +80,7 @@ export class SuggestedModelPatchGenerator {
 
     const percentage = executions.length > 0 
       ? (executionCount / executions.length * 100).toFixed(0)
-      : 0
+      : '0'
 
     return [{
       operation: 'add_transition',

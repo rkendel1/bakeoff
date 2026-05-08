@@ -66,18 +66,15 @@ export class ProviderReliabilityAnalyzer {
       const dlq = queue.getDeadLetterQueue()
       const dlqEvents = dlq.getAll()
 
-      for (const dlqEvent of dlqEvents) {
-        // Extract provider information from DLQ event
-        // Note: This is simplified - in production you'd need to track provider info
-        // through the entire execution pipeline
-        const event = dlqEvent.event
-        
-        // For now, we mark all DLQ events as affecting reliability
-        // In a real implementation, you'd track which provider caused the failure
-        for (const [, stats] of providerStats) {
-          stats.dlqExecutions++
-        }
-      }
+      // Note: Currently we don't have proper provider tracking through the execution pipeline
+      // In a production implementation, DLQ events should track which provider caused the failure
+      // For now, we skip DLQ analysis to avoid inaccurate metrics
+      
+      // TODO: Implement proper provider tracking through execution pipeline to DLQ
+      // This would require:
+      // 1. Storing provider information in QueuedEvent
+      // 2. Passing provider context through retry logic
+      // 3. Persisting provider info in DeadLetterEvent
     }
 
     // Calculate reliability metrics
