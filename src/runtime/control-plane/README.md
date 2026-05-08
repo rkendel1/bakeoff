@@ -62,7 +62,10 @@ Turns raw execution into readable insight.
   }
   timeline: ExecutionTrace[]
   stateChanges: StateUpdate[]
-  errors?: Error[]
+  errors?: Array<{
+    message: string
+    name: string
+  }>
 }
 ```
 
