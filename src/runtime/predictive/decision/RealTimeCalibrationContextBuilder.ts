@@ -133,11 +133,11 @@ export class RealTimeCalibrationContextBuilder {
     goalForecaster: number
   }> {
     // Get accuracy metrics from store
-    const riskAccuracy = await this.accuracyStore.getAccuracy(tenantId, 'risk_engine')
-    const entropyAccuracy = await this.accuracyStore.getAccuracy(tenantId, 'entropy_forecaster')
-    const decayAccuracy = await this.accuracyStore.getAccuracy(tenantId, 'decay_detector')
-    const failureAccuracy = await this.accuracyStore.getAccuracy(tenantId, 'failure_analyzer')
-    const goalAccuracy = await this.accuracyStore.getAccuracy(tenantId, 'goal_forecaster')
+    const riskAccuracy = await this.accuracyStore.getLatest(tenantId, 'risk_engine')
+    const entropyAccuracy = await this.accuracyStore.getLatest(tenantId, 'entropy_forecaster')
+    const decayAccuracy = await this.accuracyStore.getLatest(tenantId, 'decay_detector')
+    const failureAccuracy = await this.accuracyStore.getLatest(tenantId, 'failure_analyzer')
+    const goalAccuracy = await this.accuracyStore.getLatest(tenantId, 'goal_forecaster')
     
     return {
       riskEngine: riskAccuracy?.overallAccuracy || 0.8,  // Default to 0.8 if no data
@@ -157,9 +157,9 @@ export class RealTimeCalibrationContextBuilder {
     decayModel: number
   }> {
     // Get accuracy metrics to detect bias
-    const riskAccuracy = await this.accuracyStore.getAccuracy(tenantId, 'risk_engine')
-    const entropyAccuracy = await this.accuracyStore.getAccuracy(tenantId, 'entropy_forecaster')
-    const decayAccuracy = await this.accuracyStore.getAccuracy(tenantId, 'decay_detector')
+    const riskAccuracy = await this.accuracyStore.getLatest(tenantId, 'risk_engine')
+    const entropyAccuracy = await this.accuracyStore.getLatest(tenantId, 'entropy_forecaster')
+    const decayAccuracy = await this.accuracyStore.getLatest(tenantId, 'decay_detector')
     
     // Bias score: positive = overconfident, negative = underconfident
     const riskBias = riskAccuracy?.biasScore || 0
@@ -183,8 +183,11 @@ export class RealTimeCalibrationContextBuilder {
     criticalDrift: boolean
   }> {
     // Get drift metrics from calibration store
-    const riskDrift = await this.calibrationStore.getDrift(tenantId, 'risk_engine')
-    const strategyDrift = await this.calibrationStore.getDrift(tenantId, 'decay_detector')
+    const riskState = await this.calibrationStore.getState(tenantId, 'risk_engine')
+    const strategyState = await this.calibrationStore.getState(tenantId, 'decay_detector')
+    
+    const riskDrift = riskState?.driftMagnitude || 0
+    const strategyDrift = strategyState?.driftMagnitude || 0
     
     // For now, provider drift is estimated from strategy drift
     const providerDrift = strategyDrift * 0.7  // Correlated with strategy drift
