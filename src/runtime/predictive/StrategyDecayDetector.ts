@@ -86,13 +86,15 @@ export class StrategyDecayDetector {
     const dataPoints = this.buildDataPoints(outcomes)
 
     // Forecast future performance
+    const FORECAST_DAYS_24H = 1
+    const FORECAST_DAYS_7D = 7
     const predictedSuccessRate24h = Math.max(
       0,
-      recentSuccessRate - (decayVelocity * 1)  // 1 day
+      recentSuccessRate - (decayVelocity * FORECAST_DAYS_24H)
     )
     const predictedSuccessRate7d = Math.max(
       0,
-      recentSuccessRate - (decayVelocity * 7)  // 7 days
+      recentSuccessRate - (decayVelocity * FORECAST_DAYS_7D)
     )
 
     // Calculate confidence

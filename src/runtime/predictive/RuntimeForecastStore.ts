@@ -159,7 +159,7 @@ export class RuntimeForecastStore {
 
     return ranges.map((range) => {
       const inRange = verified.filter(
-        (f) => f.confidence >= range.min && f.confidence < range.max
+        (f) => f.confidence >= range.min && (range.max === 1.0 ? f.confidence <= range.max : f.confidence < range.max)
       )
 
       const accuracy = inRange.length > 0

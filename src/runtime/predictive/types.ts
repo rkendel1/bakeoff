@@ -14,7 +14,8 @@
 export type PredictedRisk = {
   type: 'provider_instability' | 'strategy_decay' | 'convergence_collapse' | 'entropy_expansion' | 'execution_failure' | 'goal_failure'
   severity: 'low' | 'medium' | 'high' | 'critical'
-  probability: number  // 0-1
+  /** Probability value from 0 to 1 (inclusive), where 0 = impossible, 1 = certain */
+  probability: number
   forecastWindow: string  // e.g., "24h", "7d"
   
   // Risk details

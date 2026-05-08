@@ -1,4 +1,4 @@
-import type { PredictiveGovernanceRecommendation } from './types.js'
+import type { PredictiveGovernanceRecommendation, PredictiveRiskAssessment } from './types.js'
 import type { PredictiveRiskEngine } from './PredictiveRiskEngine.js'
 import type { RuntimePolicyEngine } from '../policy/RuntimePolicyEngine.js'
 
@@ -132,7 +132,7 @@ export class PredictiveGovernanceEngine {
    * Generate governance recommendations
    */
   private generateGovernanceRecommendations(
-    riskAssessment: any,
+    riskAssessment: PredictiveRiskAssessment,
     predictedSafety: 'safe' | 'risky' | 'unsafe'
   ): Array<{
     type: 'preventive' | 'adaptive' | 'recovery'
