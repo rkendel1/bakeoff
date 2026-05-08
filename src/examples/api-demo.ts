@@ -69,7 +69,7 @@ console.log('   ✓ Runtime worker started\n')
 console.log('4. Starting Control Plane API Server')
 const query = new ExecutionQuery(executionStore)
 const inspector = new RuntimeInspector()
-const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
+const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore)
 
 const PORT = 3000
 await server.start(PORT)
