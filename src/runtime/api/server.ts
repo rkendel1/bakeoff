@@ -116,8 +116,20 @@ export class ControlPlaneServer {
     req: http.IncomingMessage,
     res: http.ServerResponse
   ): Promise<void> {
-    const body = await this.readBody(req)
-    const event: RuntimeEvent = JSON.parse(body)
+    let event: RuntimeEvent
+    
+    try {
+      const body = await this.readBody(req)
+      event = JSON.parse(body)
+    } catch (error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: error instanceof Error && error.message === 'Request body too large'
+          ? 'Request body too large'
+          : 'Invalid JSON in request body'
+      }))
+      return
+    }
 
     // Validate tenant exists
     if (!this.registry.hasTenant(event.tenantId)) {
@@ -223,8 +235,27 @@ export class ControlPlaneServer {
     req: http.IncomingMessage,
     res: http.ServerResponse
   ): Promise<void> {
-    const body = await this.readBody(req)
-    const { tenantId, event, modelVersion = 'latest', currentState } = JSON.parse(body)
+    let tenantId: string
+    let event: RuntimeEvent
+    let modelVersion: string
+    let currentState: string | undefined
+    
+    try {
+      const body = await this.readBody(req)
+      const parsed = JSON.parse(body)
+      tenantId = parsed.tenantId
+      event = parsed.event
+      modelVersion = parsed.modelVersion || 'latest'
+      currentState = parsed.currentState
+    } catch (error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: error instanceof Error && error.message === 'Request body too large'
+          ? 'Request body too large'
+          : 'Invalid JSON in request body'
+      }))
+      return
+    }
 
     // Get model version
     const model = this.registry.getModelVersion(tenantId, modelVersion)
@@ -243,17 +274,27 @@ export class ControlPlaneServer {
   }
 
   /**
-   * Helper to read request body
+   * Helper to read request body with size limit
    */
-  private readBody(req: http.IncomingMessage): Promise<string> {
+  private readBody(req: http.IncomingMessage, maxSize: number = 1024 * 1024): Promise<string> {
     return new Promise((resolve, reject) => {
       let body = ''
+      let size = 0
+      
       req.on('data', (chunk) => {
+        size += chunk.length
+        if (size > maxSize) {
+          req.destroy()
+          reject(new Error('Request body too large'))
+          return
+        }
         body += chunk.toString()
       })
+      
       req.on('end', () => {
         resolve(body)
       })
+      
       req.on('error', reject)
     })
   }
