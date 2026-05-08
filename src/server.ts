@@ -27,7 +27,7 @@ import { ControlPlaneServer } from "./runtime/api/server.js"
 import { DurableExecutionQueue } from "./runtime/queue/durable-execution-queue.js"
 import { RuntimeWorker } from "./runtime/worker/runtime-worker.js"
 
-console.log('[runtime-core] initializing...')
+console.log('[bakeoff-runtime-core] initializing...')
 
 // Initialize runtime infrastructure
 const registry = new TenantRuntimeRegistry()
@@ -57,7 +57,7 @@ const executionQueue = new DurableExecutionQueue()
 const worker = new RuntimeWorker(executionQueue, engines)
 worker.start()
 
-console.log('[runtime-core] worker started')
+console.log('[bakeoff-runtime-core] worker started')
 
 const query = new ExecutionQuery(executionStore)
 const inspector = new RuntimeInspector()
@@ -75,8 +75,8 @@ const port = parseInt(process.env.PORT || '8080', 10)
 // Start the server
 await server.start(port)
 
-console.log(`[runtime-core] listening on port ${port}`)
-console.log('[runtime-core] endpoints:')
+console.log(`[bakeoff-runtime-core] listening on port ${port}`)
+console.log('[bakeoff-runtime-core] endpoints:')
 console.log('  - GET /health')
 console.log('  - POST /runtime/v1/intent')
 console.log('  - POST /runtime/v1/execution/{executionId}/observe')
@@ -85,15 +85,15 @@ console.log('  - And all other runtime-core contract v1 endpoints')
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
-  console.log('[runtime-core] SIGTERM received, shutting down gracefully')
+  console.log('[bakeoff-runtime-core] SIGTERM received, shutting down gracefully')
   
   // Stop worker first to prevent new work from being processed
   worker.stop()
-  console.log('[runtime-core] worker stopped')
+  console.log('[bakeoff-runtime-core] worker stopped')
   
   // Then stop the server
   await server.stop()
-  console.log('[runtime-core] server closed')
+  console.log('[bakeoff-runtime-core] server closed')
   
   process.exit(0)
 })
