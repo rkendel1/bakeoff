@@ -4,8 +4,13 @@
  * This demonstrates the new Runtime Control Plane API Layer:
  * - TenantRuntimeRegistry: Centralized tenant model management
  * - ControlPlaneServer: HTTP API for event ingestion, execution querying, and simulation
+ * - ExecutionQueue: Decouples control plane from execution plane
+ * - RuntimeWorker: Execution plane that processes events from queue
  * 
  * This is the bridge between engine internals → platform
+ * 
+ * Architecture:
+ * POST /events → ExecutionQueue.enqueue() → RuntimeWorker.dequeue() → RuntimeEngine.ingest()
  */
 
 import { DocuSealAdapter } from '../adapters/docuseal-adapter.js'
@@ -20,6 +25,8 @@ import { ExecutionQuery } from '../runtime/control-plane/execution-query.js'
 import { RuntimeInspector } from '../runtime/control-plane/inspector.js'
 import { TenantRuntimeRegistry } from '../runtime/registry/tenant-registry.js'
 import { ControlPlaneServer } from '../runtime/api/server.js'
+import { ExecutionQueue } from '../runtime/queue/execution-queue.js'
+import { RuntimeWorker } from '../runtime/worker/runtime-worker.js'
 
 console.log('=== Control Plane API Demo ===\n')
 
@@ -50,19 +57,29 @@ const engine = new RuntimeEngine(
 const engines = new Map([['demo', engine]])
 console.log('   ✓ Runtime engine initialized for tenant: demo\n')
 
-// 3. Setup: Create Control Plane Server
-console.log('3. Starting Control Plane API Server')
+// 3. Setup: Create Execution Queue and Worker
+console.log('3. Setting up Execution Queue and Worker')
+const executionQueue = new ExecutionQueue()
+const worker = new RuntimeWorker(executionQueue, engines)
+worker.start()
+console.log('   ✓ Execution queue created')
+console.log('   ✓ Runtime worker started\n')
+
+// 4. Setup: Create Control Plane Server
+console.log('4. Starting Control Plane API Server')
 const query = new ExecutionQuery(executionStore)
 const inspector = new RuntimeInspector()
-const server = new ControlPlaneServer(registry, engines, query, inspector)
+const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
 
 const PORT = 3000
 await server.start(PORT)
 console.log(`   ✓ API Server listening on http://localhost:${PORT}\n`)
 
-// 4. Demo: Ingest Event via API
-console.log('4. Ingesting Event via API')
+// 5. Demo: Ingest Event via API
+console.log('5. Ingesting Event via API')
 console.log('   POST /events')
+console.log('   → Event enqueued by Control Plane')
+console.log('   → Worker picks up and processes event')
 const ingestResponse = await fetch(`http://localhost:${PORT}/events`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
@@ -80,10 +97,10 @@ console.log(`   ✓ Status: ${ingestResponse.status}`)
 console.log(`   ✓ Result: ${ingestResult.status}\n`)
 
 // Wait for processing
-await new Promise((resolve) => setTimeout(resolve, 100))
+await new Promise((resolve) => setTimeout(resolve, 200))
 
-// 5. Demo: Query Executions via API
-console.log('5. Querying Executions via API')
+// 6. Demo: Query Executions via API
+console.log('6. Querying Executions via API')
 console.log('   GET /executions?tenantId=demo&entityId=doc-123')
 const queryResponse = await fetch(
   `http://localhost:${PORT}/executions?tenantId=demo&entityId=doc-123`
@@ -97,11 +114,11 @@ if (queryResult.executions.length > 0) {
   console.log(`   ✓ Status: ${queryResult.executions[0].status}\n`)
 }
 
-// 6. Demo: Inspect Execution via API
+// 7. Demo: Inspect Execution via API
 if (queryResult.executions.length > 0) {
   const executionId = queryResult.executions[0].id
   
-  console.log('6. Inspecting Execution via API')
+  console.log('7. Inspecting Execution via API')
   console.log(`   GET /executions/${executionId}`)
   const inspectResponse = await fetch(`http://localhost:${PORT}/executions/${executionId}`)
   
@@ -115,8 +132,8 @@ if (queryResult.executions.length > 0) {
   console.log(`     - Providers Touched: ${inspectResult.inspection.summary.providersTouched.join(', ')}\n`)
 }
 
-// 7. Demo: Simulate Event via API
-console.log('7. Simulating Event via API')
+// 8. Demo: Simulate Event via API
+console.log('8. Simulating Event via API')
 console.log('   POST /simulate')
 const simulateResponse = await fetch(`http://localhost:${PORT}/simulate`, {
   method: 'POST',
@@ -143,15 +160,22 @@ console.log(`     - Predicted Actions: ${simulateResult.simulation.predictedActi
 console.log(`     - Emitted Events: ${simulateResult.simulation.sideEffects.emittedEvents.map((e: any) => e.type).join(', ')}\n`)
 
 // Cleanup
-console.log('8. Shutting down server')
+console.log('9. Shutting down')
+worker.stop()
+console.log('   ✓ Worker stopped')
 await server.stop()
 console.log('   ✓ Server stopped\n')
 
 console.log('=== Control Plane API Demo Complete ===')
 console.log('\n🎯 Key Takeaways:')
 console.log('   ✓ TenantRuntimeRegistry: Centralized tenant model management with versioning')
-console.log('   ✓ POST /events: External event ingestion endpoint')
+console.log('   ✓ ExecutionQueue: Decouples control plane from execution plane')
+console.log('   ✓ RuntimeWorker: Execution plane that processes events asynchronously')
+console.log('   ✓ POST /events: External event ingestion endpoint (enqueues for async processing)')
 console.log('   ✓ GET /executions: Query executions with filters (tenant, entity, status)')
 console.log('   ✓ GET /executions/:id: Inspect execution details with RuntimeInspector')
 console.log('   ✓ POST /simulate: Simulate model changes before applying them')
-console.log('\n🚀 The runtime is now a platform service - ready for OperNext integration!')
+console.log('\n🚀 The runtime is now a true control plane/execution plane architecture!')
+console.log('   - Control Plane: API layer for ingestion and querying')
+console.log('   - Execution Plane: Worker processes events from queue')
+console.log('   - Ready for scaling, worker pools, and OperNext integration!')

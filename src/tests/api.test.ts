@@ -12,6 +12,8 @@ import { Executor } from '../runtime/executor.js'
 import { Dispatcher } from '../runtime/dispatcher.js'
 import { DocuSealAdapter } from '../adapters/docuseal-adapter.js'
 import { demoTenant } from '../tenants/demo-tenant.js'
+import { ExecutionQueue } from '../runtime/queue/execution-queue.js'
+import { RuntimeWorker } from '../runtime/worker/runtime-worker.js'
 
 // --- TenantRuntimeRegistry Tests ---
 
@@ -102,8 +104,15 @@ test('ControlPlaneServer: POST /events ingests event', async () => {
   const query = new ExecutionQuery(executionStore)
   const inspector = new RuntimeInspector()
   
-  const server = new ControlPlaneServer(registry, engines, query, inspector)
+  // Create execution queue and worker
+  const executionQueue = new ExecutionQueue()
+  const worker = new RuntimeWorker(executionQueue, engines)
+  
+  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
   await server.start(3001)
+  
+  // Start worker
+  worker.start()
   
   try {
     // Ingest event via API
@@ -130,6 +139,7 @@ test('ControlPlaneServer: POST /events ingests event', async () => {
     const executions = await executionStore.all()
     assert.ok(executions.length > 0)
   } finally {
+    worker.stop()
     await server.stop()
   }
 })
@@ -166,7 +176,10 @@ test('ControlPlaneServer: GET /executions queries executions', async () => {
   const query = new ExecutionQuery(executionStore)
   const inspector = new RuntimeInspector()
   
-  const server = new ControlPlaneServer(registry, engines, query, inspector)
+  // Create execution queue (not needed for this test, but required by server)
+  const executionQueue = new ExecutionQueue()
+  
+  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
   await server.start(3002)
   
   try {
@@ -220,7 +233,10 @@ test('ControlPlaneServer: GET /executions/:id inspects execution', async () => {
   const query = new ExecutionQuery(executionStore)
   const inspector = new RuntimeInspector()
   
-  const server = new ControlPlaneServer(registry, engines, query, inspector)
+  // Create execution queue (not needed for this test, but required by server)
+  const executionQueue = new ExecutionQueue()
+  
+  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
   await server.start(3003)
   
   try {
@@ -247,7 +263,10 @@ test('ControlPlaneServer: POST /simulate simulates execution', async () => {
   const query = new ExecutionQuery(executionStore)
   const inspector = new RuntimeInspector()
   
-  const server = new ControlPlaneServer(registry, engines, query, inspector)
+  // Create execution queue (not needed for this test, but required by server)
+  const executionQueue = new ExecutionQueue()
+  
+  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
   await server.start(3004)
   
   try {
