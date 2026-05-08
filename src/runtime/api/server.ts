@@ -45,6 +45,14 @@ import { AdaptiveConfidenceScaler } from '../predictive/calibration/AdaptiveConf
 import { PredictionDriftDetector } from '../predictive/calibration/PredictionDriftDetector.js'
 import { SelfHealingForecastAdjuster } from '../predictive/calibration/SelfHealingForecastAdjuster.js'
 import { ForecastCalibrationEngine } from '../predictive/calibration/ForecastCalibrationEngine.js'
+import { DecisionCalibrationStore } from '../predictive/decision/DecisionCalibrationStore.js'
+import { StrategyBiasStore } from '../predictive/decision/StrategyBiasStore.js'
+import { PlanRewriteAuditStore } from '../predictive/decision/PlanRewriteAuditStore.js'
+import { RealTimeCalibrationContextBuilder } from '../predictive/decision/RealTimeCalibrationContextBuilder.js'
+import { CalibrationAwareRiskEngineWrapper } from '../predictive/decision/CalibrationAwareRiskEngineWrapper.js'
+import { StrategyBiasInjector } from '../predictive/decision/StrategyBiasInjector.js'
+import { DecisionTimeCalibrationEngine } from '../predictive/decision/DecisionTimeCalibrationEngine.js'
+import { ExecutionPlanRewriter } from '../predictive/decision/ExecutionPlanRewriter.js'
 
 /**
  * ControlPlaneServer - HTTP API server for the runtime control plane
@@ -107,6 +115,16 @@ export class ControlPlaneServer {
   private predictionDriftDetector: PredictionDriftDetector
   private selfHealingAdjuster: SelfHealingForecastAdjuster
   private forecastCalibrationEngine: ForecastCalibrationEngine
+  
+  // Decision-Time Calibration Layer
+  private decisionCalibrationStore: DecisionCalibrationStore
+  private strategyBiasStore: StrategyBiasStore
+  private planRewriteAuditStore: PlanRewriteAuditStore
+  private calibrationContextBuilder: RealTimeCalibrationContextBuilder
+  private calibratedRiskEngine: CalibrationAwareRiskEngineWrapper
+  private strategyBiasInjector: StrategyBiasInjector
+  private decisionTimeCalibration: DecisionTimeCalibrationEngine
+  private executionPlanRewriter: ExecutionPlanRewriter
 
   constructor(
     private readonly registry: TenantRuntimeRegistry,
@@ -208,6 +226,32 @@ export class ControlPlaneServer {
       this.predictionDriftDetector,
       this.selfHealingAdjuster,
       this.calibrationStore
+    )
+    
+    // Initialize Decision-Time Calibration Layer
+    this.decisionCalibrationStore = new DecisionCalibrationStore()
+    this.strategyBiasStore = new StrategyBiasStore()
+    this.planRewriteAuditStore = new PlanRewriteAuditStore()
+    this.calibrationContextBuilder = new RealTimeCalibrationContextBuilder(
+      this.predictionAccuracyStore,
+      this.calibrationStore,
+      this.decayDetector,
+      this.strategyBiasStore
+    )
+    this.calibratedRiskEngine = new CalibrationAwareRiskEngineWrapper(
+      this.predictiveRiskEngine
+    )
+    this.strategyBiasInjector = new StrategyBiasInjector(
+      this.strategyBiasStore
+    )
+    this.decisionTimeCalibration = new DecisionTimeCalibrationEngine(
+      this.calibrationContextBuilder,
+      this.calibratedRiskEngine,
+      this.strategyBiasInjector,
+      this.decisionCalibrationStore
+    )
+    this.executionPlanRewriter = new ExecutionPlanRewriter(
+      this.planRewriteAuditStore
     )
   }
 
@@ -312,6 +356,12 @@ export class ControlPlaneServer {
         await this.handlePredictiveCalibrate(req, res)
       } else if (req.method === 'GET' && pathname === '/predictive/drift') {
         await this.handlePredictiveDrift(req, res, url)
+      } else if (req.method === 'GET' && pathname === '/predictive/decision-context') {
+        await this.handleDecisionContext(req, res, url)
+      } else if (req.method === 'POST' && pathname === '/predictive/decision/evaluate') {
+        await this.handleDecisionEvaluate(req, res)
+      } else if (req.method === 'GET' && pathname === '/predictive/plan-rewrites') {
+        await this.handlePlanRewrites(req, res, url)
       } else {
         res.writeHead(404, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Not found' }))
@@ -1900,6 +1950,186 @@ export class ControlPlaneServer {
       res.writeHead(500, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         error: error instanceof Error ? error.message : 'Failed to get drift metrics'
+      }))
+    }
+  }
+
+  /**
+   * GET /predictive/decision-context - Get live calibration context
+   * 
+   * Query params:
+   * - tenantId: required
+   * 
+   * Returns live calibration context for decision-time correction.
+   * 
+   * Returns:
+   * {
+   *   "tenantId": "t1",
+   *   "predictionAccuracy": { ... },
+   *   "biasAdjustments": { ... },
+   *   "driftState": { ... },
+   *   "strategyPreferences": { ... },
+   *   "providerReliabilityBias": { ... },
+   *   "confidenceScaling": { ... },
+   *   "confidence": 0.85
+   * }
+   */
+  private async handleDecisionContext(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Missing required parameter: tenantId' }))
+      return
+    }
+
+    try {
+      // Build calibration context
+      const context = await this.calibrationContextBuilder.buildContext(tenantId)
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(context))
+    } catch (error) {
+      console.error('Error building decision context:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to build decision context'
+      }))
+    }
+  }
+
+  /**
+   * POST /predictive/decision/evaluate - Evaluate decision pipeline
+   * 
+   * Body:
+   * {
+   *   "tenantId": "t1",
+   *   "goalId": "goal-123" (optional)
+   * }
+   * 
+   * Runs full decision-time pipeline: forecast → calibration → decision
+   * 
+   * Returns:
+   * {
+   *   "tenantId": "t1",
+   *   "stages": {
+   *     "forecast": { ... },
+   *     "calibration": { ... },
+   *     "finalDecision": {
+   *       "shouldProceed": true,
+   *       "recommendedStrategy": "...",
+   *       "confidence": 0.85
+   *     }
+   *   },
+   *   "summary": {
+   *     "calibrationApplied": true,
+   *     "decisionsModified": 2,
+   *     "riskReduction": 0.14,
+   *     "expectedSuccessIncrease": 0.08
+   *   },
+   *   "recommendations": [...]
+   * }
+   */
+  private async handleDecisionEvaluate(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    try {
+      const body = await this.readBody(req)
+      const data = JSON.parse(body)
+
+      if (!data.tenantId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Missing required field: tenantId' }))
+        return
+      }
+
+      // Evaluate decision pipeline
+      const result = await this.decisionTimeCalibration.evaluateDecisionPipeline(
+        data.tenantId,
+        data.goalId
+      )
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(result))
+    } catch (error) {
+      console.error('Error evaluating decision pipeline:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to evaluate decision pipeline'
+      }))
+    }
+  }
+
+  /**
+   * GET /predictive/plan-rewrites - Get plan rewrite audit trail
+   * 
+   * Query params:
+   * - tenantId: required
+   * - limit: optional (default: 50)
+   * 
+   * Returns audit trail of all execution plan rewrites.
+   * 
+   * Returns:
+   * {
+   *   "tenantId": "t1",
+   *   "rewrites": [
+   *     {
+   *       "id": "...",
+   *       "originalPlan": { ... },
+   *       "rewrittenPlan": { ... },
+   *       "rewriteReason": "...",
+   *       "calibrationFactors": [...],
+   *       "rewrittenAt": "...",
+   *       "confidence": 0.85
+   *     }
+   *   ],
+   *   "stats": {
+   *     "totalRewrites": 45,
+   *     "verifiedRewrites": 38,
+   *     "correctRewrites": 32,
+   *     "rewriteAccuracy": 0.84
+   *   }
+   * }
+   */
+  private async handlePlanRewrites(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+    const limitParam = url.searchParams.get('limit')
+    const limit = limitParam ? parseInt(limitParam, 10) : 50
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Missing required parameter: tenantId' }))
+      return
+    }
+
+    try {
+      // Get rewrites
+      const rewrites = await this.planRewriteAuditStore.getRewritesForTenant(tenantId, limit)
+
+      // Get effectiveness stats
+      const stats = await this.executionPlanRewriter.getRewriteEffectiveness(tenantId)
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        tenantId,
+        rewrites,
+        stats,
+        retrievedAt: new Date()
+      }))
+    } catch (error) {
+      console.error('Error getting plan rewrites:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to get plan rewrites'
       }))
     }
   }
