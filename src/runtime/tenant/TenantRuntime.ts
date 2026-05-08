@@ -44,8 +44,17 @@ export class TenantRuntime {
     })
   }
 
+  /**
+   * Observe execution outcome for learning and calibration
+   * 
+   * NOTE: This method calls RuntimeCore.observe() which is currently a placeholder.
+   * The observe functionality will be fully implemented in the next phase when
+   * integrating with ForecastOutcomeTracker and PredictionAccuracyAnalyzer.
+   * 
+   * For now, this ensures the interface is ready for future learning loop integration.
+   */
   async observe(executionId: string, outcome: any) {
-    return this.runtime.observe?.({
+    return this.runtime.observe({
       executionId,
       tenantId: this.tenantId,
       outcome

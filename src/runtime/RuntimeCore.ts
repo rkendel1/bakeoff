@@ -12,6 +12,7 @@
  * - Per-tenant governance policies
  */
 
+import { randomUUID } from 'node:crypto'
 import type { RuntimeEngine } from './engine.js'
 import type { RuntimeMemoryStore } from './memory/RuntimeMemoryStore.js'
 
@@ -54,7 +55,8 @@ export class RuntimeCore {
     // This is a simplified execution flow that will be enhanced
     // as the system evolves. For now, it returns a basic structure.
     
-    const executionId = `exec-${Date.now()}-${Math.random().toString(36).substring(7)}`
+    // Use UUID for collision-free execution ID generation
+    const executionId = `exec-${randomUUID()}`
     
     return {
       executionId,
@@ -76,12 +78,22 @@ export class RuntimeCore {
 
   /**
    * Observe execution outcome (enables learning)
+   * 
+   * TODO: Implement observation storage and learning loop
+   * - Store observation in memory store for historical analysis
+   * - Update prediction models based on actual outcomes
+   * - Calibrate forecast confidence scores
+   * - Adjust strategy effectiveness scores
+   * - Track outcome patterns for future predictions
+   * 
+   * This is critical for the system's learning capabilities and will be
+   * implemented in the next phase of the tenant isolation layer.
    */
   async observe(observation: RuntimeCoreObservation): Promise<void> {
     // Store observation for learning and calibration
     // This enables the runtime to improve over time
     
-    // Future enhancement: update prediction models, calibrate forecasts,
-    // adjust strategy effectiveness scores
+    // Placeholder: Will be implemented with full learning loop integration
+    // when connecting to ForecastOutcomeTracker and PredictionAccuracyAnalyzer
   }
 }
