@@ -212,7 +212,16 @@ export class CanonicalPatternGraph {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
       return `pattern_${crypto.randomUUID()}`
     }
-    // More robust fallback: combine timestamp, process PID, and multiple random values
+    
+    // Fallback using crypto.getRandomValues() for better security
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      const array = new Uint32Array(4)
+      crypto.getRandomValues(array)
+      const hex = Array.from(array).map(n => n.toString(16).padStart(8, '0')).join('')
+      return `pattern_${hex}`
+    }
+    
+    // Final fallback for environments without crypto
     const timestamp = Date.now()
     const pid = typeof process !== 'undefined' && process.pid ? process.pid : 0
     const rand1 = Math.random().toString(36).substring(2)

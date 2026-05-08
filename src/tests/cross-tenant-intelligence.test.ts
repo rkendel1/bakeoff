@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { CrossTenantSignalAggregator, type TenantSnapshot } from '../runtime/intelligence/cross-tenant/CrossTenantSignalAggregator.js'
-import { CanonicalPatternGraph } from '../runtime/intelligence/cross-tenant/CanonicalPatternGraph.js'
-import { RecommendationAmplificationEngine } from '../runtime/intelligence/cross-tenant/RecommendationAmplificationEngine.js'
+import { CanonicalPatternGraph, type ProviderReliability } from '../runtime/intelligence/cross-tenant/CanonicalPatternGraph.js'
+import { RecommendationAmplificationEngine, type GlobalRecommendation } from '../runtime/intelligence/cross-tenant/RecommendationAmplificationEngine.js'
 
 test('CrossTenantSignalAggregator: aggregates tenant snapshots', () => {
   const aggregator = new CrossTenantSignalAggregator()
@@ -113,7 +113,7 @@ test('CanonicalPatternGraph: tracks provider reliability', () => {
   
   assert.ok(providers.length > 0)
   
-  const providerA = providers.find((p: any) => p.provider === 'provider-a')
+  const providerA = providers.find((p: ProviderReliability) => p.provider === 'provider-a')
   assert.ok(providerA)
   assert.ok(providerA.successRate > 0)
   assert.ok(providerA.totalOperations > 0)
@@ -187,7 +187,7 @@ test('RecommendationAmplificationEngine: generates recommendations', () => {
   assert.ok(recommendations.length > 0)
   
   // Should recommend entropy reduction
-  const entropyRec = recommendations.find((r: any) => r.type === 'entropy_reduction')
+  const entropyRec = recommendations.find((r: GlobalRecommendation) => r.type === 'entropy_reduction')
   assert.ok(entropyRec)
   assert.ok(entropyRec.confidence > 0)
   assert.ok(entropyRec.actionableSteps.length > 0)

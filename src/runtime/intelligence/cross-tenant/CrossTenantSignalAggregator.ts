@@ -112,8 +112,16 @@ export class CrossTenantSignalAggregator {
   }
 
   private hashStrategy(strategy: { type: string; [key: string]: any }): string {
-    // Use a simple but more collision-resistant hash
-    const str = JSON.stringify(strategy)
+    // Sort keys for consistent serialization
+    const sortedKeys = Object.keys(strategy).sort()
+    const sortedObj: Record<string, any> = {}
+    for (const key of sortedKeys) {
+      sortedObj[key] = strategy[key]
+    }
+    
+    const str = JSON.stringify(sortedObj)
+    
+    // Simple but more collision-resistant hash
     let hash = 0
     for (let i = 0; i < str.length; i++) {
       const char = str.charCodeAt(i)
