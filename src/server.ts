@@ -84,8 +84,8 @@ console.log('  - GET /runtime/v1/intelligence/*')
 console.log('  - And all other runtime-core contract v1 endpoints')
 
 // Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('[bakeoff-runtime-core] SIGTERM received, shutting down gracefully')
+const shutdown = async (signal: string) => {
+  console.log(`[bakeoff-runtime-core] ${signal} received, shutting down gracefully`)
   
   // Stop worker first to prevent new work from being processed
   worker.stop()
@@ -96,4 +96,7 @@ process.on('SIGTERM', async () => {
   console.log('[bakeoff-runtime-core] server closed')
   
   process.exit(0)
-})
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))
