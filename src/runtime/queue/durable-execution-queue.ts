@@ -1,8 +1,15 @@
 import type { RuntimeEvent } from '../../models/event.js'
-import type { ExecutionStatus } from '../store/execution-record.js'
 import { RetryPolicy } from '../retry/retry-policy.js'
 import { DeadLetterQueue } from './dead-letter-queue.js'
 import { randomUUID } from 'node:crypto'
+
+/**
+ * QueueStatus - Status of an event in the durable queue
+ * 
+ * This is separate from ExecutionStatus (running/completed/failed)
+ * which tracks the engine's execution state.
+ */
+export type QueueStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'retrying'
 
 /**
  * QueuedEvent - Represents an event in the durable queue with metadata
@@ -13,7 +20,7 @@ import { randomUUID } from 'node:crypto'
 export type QueuedEvent = {
   id: string
   event: RuntimeEvent
-  status: ExecutionStatus
+  status: QueueStatus
   attempts: number
   lastError?: string
   createdAt: Date

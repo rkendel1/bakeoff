@@ -4,13 +4,13 @@
  * This demonstrates the new Runtime Control Plane API Layer:
  * - TenantRuntimeRegistry: Centralized tenant model management
  * - ControlPlaneServer: HTTP API for event ingestion, execution querying, and simulation
- * - ExecutionQueue: Decouples control plane from execution plane
- * - RuntimeWorker: Execution plane that processes events from queue
+ * - DurableExecutionQueue: Decouples control plane from execution plane with durability guarantees
+ * - RuntimeWorker: Execution plane that processes events from queue with ack semantics
  * 
  * This is the bridge between engine internals → platform
  * 
  * Architecture:
- * POST /events → ExecutionQueue.enqueue() → RuntimeWorker.dequeue() → RuntimeEngine.ingest()
+ * POST /events → DurableExecutionQueue.enqueue() → RuntimeWorker.dequeue() → RuntimeEngine.ingest() → Queue.ack()
  */
 
 import { DocuSealAdapter } from '../adapters/docuseal-adapter.js'
@@ -25,7 +25,7 @@ import { ExecutionQuery } from '../runtime/control-plane/execution-query.js'
 import { RuntimeInspector } from '../runtime/control-plane/inspector.js'
 import { TenantRuntimeRegistry } from '../runtime/registry/tenant-registry.js'
 import { ControlPlaneServer } from '../runtime/api/server.js'
-import { ExecutionQueue } from '../runtime/queue/execution-queue.js'
+import { DurableExecutionQueue } from '../runtime/queue/durable-execution-queue.js'
 import { RuntimeWorker } from '../runtime/worker/runtime-worker.js'
 
 console.log('=== Control Plane API Demo ===\n')
@@ -59,10 +59,10 @@ console.log('   ✓ Runtime engine initialized for tenant: demo\n')
 
 // 3. Setup: Create Execution Queue and Worker
 console.log('3. Setting up Execution Queue and Worker')
-const executionQueue = new ExecutionQueue()
+const executionQueue = new DurableExecutionQueue()
 const worker = new RuntimeWorker(executionQueue, engines)
 worker.start()
-console.log('   ✓ Execution queue created')
+console.log('   ✓ Durable execution queue created')
 console.log('   ✓ Runtime worker started\n')
 
 // 4. Setup: Create Control Plane Server
