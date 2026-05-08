@@ -129,7 +129,7 @@ test('ControlPlaneServer: POST /events ingests event', async () => {
   const executionQueue = new DurableExecutionQueue()
   const worker = new RuntimeWorker(executionQueue, engines)
   
-  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
+  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore)
   await server.start(3001)
   
   // Start worker
@@ -206,7 +206,7 @@ test('ControlPlaneServer: GET /executions queries executions', async () => {
   // Create execution queue (not needed for this test, but required by server)
   const executionQueue = new DurableExecutionQueue()
   
-  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
+  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore)
   await server.start(3002)
   
   try {
@@ -263,7 +263,7 @@ test('ControlPlaneServer: GET /executions/:id inspects execution', async () => {
   // Create execution queue (not needed for this test, but required by server)
   const executionQueue = new DurableExecutionQueue()
   
-  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
+  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore)
   await server.start(3003)
   
   try {
@@ -293,7 +293,7 @@ test('ControlPlaneServer: POST /simulate simulates execution', async () => {
   // Create execution queue (not needed for this test, but required by server)
   const executionQueue = new DurableExecutionQueue()
   
-  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
+  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore)
   await server.start(3004)
   
   try {

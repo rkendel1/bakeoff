@@ -7,6 +7,10 @@ import type { TenantRuntimeRegistry } from '../registry/tenant-registry.js'
 import type { ExecutionRecord } from '../store/execution-record.js'
 import { simulate } from '../simulate/simulation-engine.js'
 import type { DurableExecutionQueue } from '../queue/durable-execution-queue.js'
+import { BehavioralDiffEngine } from '../diff/behavioral-diff-engine.js'
+import { CompatibilityAnalyzer } from '../migration/compatibility.js'
+import { MigrationSimulator } from '../migration/migration-simulator.js'
+import type { ExecutionStore } from '../store/execution-store.js'
 
 /**
  * ControlPlaneServer - HTTP API server for the runtime control plane
@@ -26,15 +30,22 @@ import type { DurableExecutionQueue } from '../queue/durable-execution-queue.js'
  */
 export class ControlPlaneServer {
   private server: http.Server
+  private diffEngine: BehavioralDiffEngine
+  private compatibilityAnalyzer: CompatibilityAnalyzer
+  private migrationSimulator: MigrationSimulator
 
   constructor(
     private readonly registry: TenantRuntimeRegistry,
     private readonly engines: Map<string, RuntimeEngine>,
     private readonly executionQuery: ExecutionQuery,
     private readonly inspector: RuntimeInspector,
-    private readonly executionQueue: DurableExecutionQueue
+    private readonly executionQueue: DurableExecutionQueue,
+    private readonly executionStore: ExecutionStore
   ) {
     this.server = http.createServer(this.handleRequest.bind(this))
+    this.diffEngine = new BehavioralDiffEngine()
+    this.compatibilityAnalyzer = new CompatibilityAnalyzer()
+    this.migrationSimulator = new MigrationSimulator()
   }
 
   /**
@@ -92,6 +103,10 @@ export class ControlPlaneServer {
         await this.handleInspectExecution(req, res, pathname)
       } else if (req.method === 'POST' && pathname === '/simulate') {
         await this.handleSimulate(req, res)
+      } else if (req.method === 'GET' && pathname === '/models/diff') {
+        await this.handleModelDiff(req, res, url)
+      } else if (req.method === 'POST' && pathname === '/models/simulate-migration') {
+        await this.handleSimulateMigration(req, res)
       } else {
         res.writeHead(404, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Not found' }))
@@ -297,6 +312,192 @@ export class ControlPlaneServer {
 
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ simulation }))
+  }
+
+  /**
+   * GET /models/diff?tenantId=&from=&to=
+   * 
+   * Compare two model versions and produce behavioral diff
+   * 
+   * Query params:
+   * - tenantId: Tenant identifier
+   * - from: Source model version
+   * - to: Target model version
+   * 
+   * Returns:
+   * {
+   *   diff: BehavioralDiff,
+   *   compatibility: CompatibilityReport
+   * }
+   */
+  private async handleModelDiff(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+    const fromVersion = url.searchParams.get('from')
+    const toVersion = url.searchParams.get('to')
+
+    // Validate parameters
+    if (!tenantId || !fromVersion || !toVersion) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: 'Missing required parameters: tenantId, from, to' 
+      }))
+      return
+    }
+
+    // Get models
+    const fromModel = this.registry.getModelVersion(tenantId, fromVersion)
+    const toModel = this.registry.getModelVersion(tenantId, toVersion)
+
+    if (!fromModel) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: `Model version not found: ${tenantId}@${fromVersion}` 
+      }))
+      return
+    }
+
+    if (!toModel) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: `Model version not found: ${tenantId}@${toVersion}` 
+      }))
+      return
+    }
+
+    // Compute behavioral diff
+    const diff = this.diffEngine.diff(fromModel, toModel)
+
+    // Analyze compatibility
+    const compatibility = this.compatibilityAnalyzer.analyze(diff)
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ diff, compatibility }))
+  }
+
+  /**
+   * POST /models/simulate-migration
+   * 
+   * Simulate migration impact by replaying historical executions
+   * against a new model version.
+   * 
+   * Body:
+   * {
+   *   "tenantId": "t1",
+   *   "fromVersion": "v1.0",
+   *   "toVersion": "v2.0",
+   *   "sampleSize": 100  // optional
+   * }
+   * 
+   * Returns:
+   * {
+   *   simulations: MigrationSimulationResult[],
+   *   summary: {
+   *     total: number,
+   *     changed: number,
+   *     unchanged: number,
+   *     changeRate: number
+   *   }
+   * }
+   */
+  private async handleSimulateMigration(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    let tenantId: string
+    let fromVersion: string
+    let toVersion: string
+    let sampleSize: number | undefined
+
+    try {
+      const body = await this.readBody(req)
+      const parsed = JSON.parse(body)
+      tenantId = parsed.tenantId
+      fromVersion = parsed.fromVersion
+      toVersion = parsed.toVersion
+      sampleSize = parsed.sampleSize
+    } catch (error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: error instanceof Error && error.message === 'Request body too large'
+          ? 'Request body too large'
+          : 'Invalid JSON in request body'
+      }))
+      return
+    }
+
+    // Validate models exist
+    const fromModel = this.registry.getModelVersion(tenantId, fromVersion)
+    const toModel = this.registry.getModelVersion(tenantId, toVersion)
+
+    if (!fromModel) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: `Model version not found: ${tenantId}@${fromVersion}` 
+      }))
+      return
+    }
+
+    if (!toModel) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: `Model version not found: ${tenantId}@${toVersion}` 
+      }))
+      return
+    }
+
+    // Get historical executions for the tenant with the fromVersion
+    const allExecutions = await this.executionStore.listByTenant(tenantId)
+    const historicalExecutions = allExecutions.filter(
+      (exec) => exec.modelVersion === fromVersion && exec.status === 'completed'
+    )
+
+    if (historicalExecutions.length === 0) {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        simulations: [],
+        summary: {
+          total: 0,
+          changed: 0,
+          unchanged: 0,
+          changeRate: 0
+        }
+      }))
+      return
+    }
+
+    // Run migration simulation
+    const simulations = await this.migrationSimulator.simulateMigration(
+      fromModel,
+      toModel,
+      {
+        tenantId,
+        fromVersion,
+        toVersion,
+        historicalExecutions,
+        sampleSize
+      }
+    )
+
+    // Calculate summary statistics
+    const total = simulations.length
+    const changed = simulations.filter((s) => s.changed).length
+    const unchanged = total - changed
+    const changeRate = total > 0 ? (changed / total) * 100 : 0
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      simulations,
+      summary: {
+        total,
+        changed,
+        unchanged,
+        changeRate: Math.round(changeRate * 100) / 100
+      }
+    }))
   }
 
   /**
