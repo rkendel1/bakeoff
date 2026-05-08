@@ -1,0 +1,19 @@
+app = "bakeoff-runtime-core"
+primary_region = "bos"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Keep machines running for stateful runtime (memory + execution store)
+  # Change to true if cost optimization is needed for development/demo
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+

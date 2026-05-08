@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsx --test src/tests/runtime.test.ts",
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "start:prod": "node dist/server.js",
+    "dev": "tsx src/index.ts",
+    "test": "tsx --test src/tests/runtime.test.ts"
   },
   "devDependencies": {
     "@types/node": "^24.12.3",
