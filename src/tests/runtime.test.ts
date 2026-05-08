@@ -86,6 +86,8 @@ test('execution store tracks execution records', async () => {
   })
 
   // Verify executions by tenant
+  // Two executions are expected: one for the ingested 'document.uploaded' event
+  // and one for the follow-up 'signature.completed' event
   const tenantExecutions = await executionStore.listByTenant('tenant-1')
   assert.equal(tenantExecutions.length, 2)
   
@@ -156,4 +158,9 @@ test('execution store tracks failed executions', async () => {
   assert.equal(failedExecutions.length, 1)
   assert.equal(failedExecutions[0].status, 'failed')
   assert.ok(failedExecutions[0].completedAt instanceof Date)
+  
+  // Verify error details are captured
+  assert.ok(failedExecutions[0].error)
+  assert.equal(failedExecutions[0].error?.message, 'Execution failed')
+  assert.equal(failedExecutions[0].error?.name, 'Error')
 })

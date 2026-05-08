@@ -15,4 +15,8 @@ export type ExecutionRecord = {
 
   createdAt: Date
   completedAt?: Date
+  error?: {
+    message: string
+    name: string
+  }
 }

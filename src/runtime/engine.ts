@@ -41,7 +41,8 @@ export class RuntimeEngine {
       const ctx = this.createContext(currentEvent)
       const executionId = randomUUID()
 
-      // Create execution record at start
+      // Create execution record at start with initial context snapshot
+      // This snapshot captures the input state before pipeline execution
       const executionRecord: ExecutionRecord = {
         id: executionId,
         tenantId: currentEvent.tenantId,
@@ -64,7 +65,8 @@ export class RuntimeEngine {
           createEmitStage()
         ])
 
-        // Update execution record with completed status
+        // Update execution record with completed status and final context
+        // The context snapshot is updated to include all pipeline results
         await this.executionStore.update(executionId, {
           status: 'completed',
           contextSnapshot: result,
@@ -75,10 +77,14 @@ export class RuntimeEngine {
           this.dispatcher.enqueue(followUpEvent)
         }
       } catch (error) {
-        // Update execution record with failed status
+        // Update execution record with failed status and error details
         await this.executionStore.update(executionId, {
           status: 'failed',
-          completedAt: new Date()
+          completedAt: new Date(),
+          error: {
+            message: error instanceof Error ? error.message : String(error),
+            name: error instanceof Error ? error.name : 'Error'
+          }
         })
         throw error
       }
