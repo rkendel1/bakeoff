@@ -84,7 +84,14 @@ test('ExecutionQuery: getFailed returns only failed executions', async () => {
   const eventStore = new EventStore()
   
   class FailingAdapter extends DocuSealAdapter {
-    override async execute() {
+    override async execute(action: {
+      name: string
+      event: {
+        tenantId: string
+        entityId: string
+        entityType: string
+      }
+    }): Promise<never> {
       throw new Error('Adapter failed')
     }
   }
