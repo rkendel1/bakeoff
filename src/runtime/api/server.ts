@@ -1083,7 +1083,7 @@ export class ControlPlaneServer {
       }
 
       const goalDefinition = {
-        id: `goal-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: `goal-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
         tenantId: data.tenantId,
         goal: data.goal,
         description: data.description || '',

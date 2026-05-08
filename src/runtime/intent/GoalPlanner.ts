@@ -1,4 +1,4 @@
-import type { StrategySelection, GoalDefinition, StrategyDefinition } from './types.js'
+import type { StrategySelection, GoalDefinition, StrategyDefinition, GoalOutcome } from './types.js'
 import type { StrategyOutcomeStore } from './StrategyOutcomeStore.js'
 import type { IntentGraph } from './IntentGraph.js'
 import type { RuntimeMemoryStore } from '../memory/RuntimeMemoryStore.js'
@@ -181,7 +181,7 @@ export class GoalPlanner {
   /**
    * Compute historical data summary
    */
-  private computeHistoricalData(outcomes: any[]): {
+  private computeHistoricalData(outcomes: GoalOutcome[]): {
     timesApplied: number
     successRate: number
     averageExecutionTimeMs: number
@@ -196,14 +196,14 @@ export class GoalPlanner {
       }
     }
 
-    const successfulOutcomes = outcomes.filter((o: any) => o.goalAchieved)
+    const successfulOutcomes = outcomes.filter((o: GoalOutcome) => o.goalAchieved)
     const successRate = successfulOutcomes.length / outcomes.length
 
-    const avgExecutionTimeMs = outcomes.reduce((sum: number, o: any) => {
+    const avgExecutionTimeMs = outcomes.reduce((sum: number, o: GoalOutcome) => {
       return sum + o.totalExecutionTimeMs
     }, 0) / outcomes.length
 
-    const avgRetries = outcomes.reduce((sum: number, o: any) => {
+    const avgRetries = outcomes.reduce((sum: number, o: GoalOutcome) => {
       return sum + o.retryCount
     }, 0) / outcomes.length
 
