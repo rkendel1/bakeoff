@@ -14,6 +14,9 @@ import {
   createApplyStage,
   createEmitStage
 } from './pipeline/stages.js'
+import { ExecutionStore } from './store/execution-store.js'
+import type { ExecutionRecord } from './store/execution-record.js'
+import { randomUUID } from 'node:crypto'
 
 export class RuntimeEngine {
   constructor(
@@ -22,6 +25,7 @@ export class RuntimeEngine {
     private readonly eventStore: EventStore,
     private readonly executor: Executor,
     private readonly dispatcher: Dispatcher,
+    private readonly executionStore: ExecutionStore,
     private readonly initialState = 'draft'
   ) {}
 
@@ -35,18 +39,48 @@ export class RuntimeEngine {
       }
 
       const ctx = this.createContext(currentEvent)
+      const executionId = randomUUID()
 
-      const result = await pipe(ctx, [
-        createIngestStage(this.eventStore),
-        createEvaluateStage(this.stateStore, this.initialState),
-        createPlanStage(),
-        createExecuteStage(this.executor),
-        createApplyStage(this.stateStore),
-        createEmitStage()
-      ])
+      // Create execution record at start
+      const executionRecord: ExecutionRecord = {
+        id: executionId,
+        tenantId: currentEvent.tenantId,
+        entityId: currentEvent.entityId,
+        event: currentEvent,
+        status: 'running',
+        contextSnapshot: ctx,
+        createdAt: new Date()
+      }
 
-      for (const followUpEvent of result.emittedEvents) {
-        this.dispatcher.enqueue(followUpEvent)
+      await this.executionStore.create(executionRecord)
+
+      try {
+        const result = await pipe(ctx, [
+          createIngestStage(this.eventStore),
+          createEvaluateStage(this.stateStore, this.initialState),
+          createPlanStage(),
+          createExecuteStage(this.executor),
+          createApplyStage(this.stateStore),
+          createEmitStage()
+        ])
+
+        // Update execution record with completed status
+        await this.executionStore.update(executionId, {
+          status: 'completed',
+          contextSnapshot: result,
+          completedAt: new Date()
+        })
+
+        for (const followUpEvent of result.emittedEvents) {
+          this.dispatcher.enqueue(followUpEvent)
+        }
+      } catch (error) {
+        // Update execution record with failed status
+        await this.executionStore.update(executionId, {
+          status: 'failed',
+          completedAt: new Date()
+        })
+        throw error
       }
     }
   }

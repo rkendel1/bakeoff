@@ -6,9 +6,11 @@ import { Executor } from './runtime/executor.js'
 import { EventStore } from './store/event-store.js'
 import { StateStore } from './store/state-store.js'
 import { demoTenant } from './tenants/demo-tenant.js'
+import { ExecutionStore } from './runtime/store/execution-store.js'
 
 const stateStore = new StateStore()
 const eventStore = new EventStore()
+const executionStore = new ExecutionStore()
 
 const engine = new RuntimeEngine(
   demoTenant,
@@ -18,7 +20,8 @@ const engine = new RuntimeEngine(
     docuseal: new DocuSealAdapter(),
     mock: new MockAdapter()
   }),
-  new Dispatcher()
+  new Dispatcher(),
+  executionStore
 )
 
 await engine.ingest({
@@ -33,3 +36,8 @@ await engine.ingest({
 
 console.log('[runtime] transitions', stateStore.history())
 console.log('[runtime] final state', stateStore.get('doc-123'))
+
+// Show execution records
+const executions = await executionStore.all()
+console.log('[runtime] execution records', executions.length)
+console.log('[runtime] execution statuses', executions.map((e) => ({ id: e.id, status: e.status })))

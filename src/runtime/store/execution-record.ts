@@ -1,0 +1,18 @@
+import type { RuntimeEvent } from '../../models/event.js'
+import type { ExecutionContext } from '../context/execution-context.js'
+
+export type ExecutionStatus = 'running' | 'completed' | 'failed'
+
+export type ExecutionRecord = {
+  id: string
+  tenantId: string
+  entityId: string
+  event: RuntimeEvent
+
+  status: ExecutionStatus
+
+  contextSnapshot: ExecutionContext
+
+  createdAt: Date
+  completedAt?: Date
+}
