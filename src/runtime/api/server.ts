@@ -336,6 +336,27 @@ export class ControlPlaneServer {
         return
       }
       
+      // Root endpoint - API info
+      if (req.method === 'GET' && pathname === '/') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          service: 'bakeoff-runtime-core',
+          version: '1.0.0',
+          status: 'operational',
+          endpoints: {
+            health: 'GET /health',
+            events: 'POST /events',
+            executions: 'GET /executions',
+            intent: 'POST /runtime/v1/intent',
+            intelligence: 'GET /intelligence/*',
+            policy: 'POST /policy/*',
+            predictive: 'GET /predictive/*'
+          },
+          documentation: 'https://github.com/rkendel1/bakeoff'
+        }))
+        return
+      }
+      
       // Route requests
       if (req.method === 'POST' && pathname === '/events') {
         await this.handleIngestEvent(req, res)
