@@ -63,7 +63,7 @@ const successEventId = queue.enqueue({
   entityType: 'document',
   type: 'document.uploaded',
   payload: {}
-})
+}, 'latest')
 
 console.log(`✓ Event enqueued (ID: ${successEventId})`)
 console.log(`  Queue size: ${queue.size()}`)
@@ -96,7 +96,7 @@ const failingEventId = queue.enqueue({
   entityType: 'document',
   type: 'document.uploaded',
   payload: {}
-})
+}, 'latest')
 
 console.log(`✓ Event enqueued (ID: ${failingEventId})`)
 console.log(`  Queue size: ${queue.size()}`)
@@ -140,7 +140,7 @@ const crashEventId = queue.enqueue({
   entityType: 'document',
   type: 'document.uploaded',
   payload: {}
-})
+}, 'latest')
 
 console.log(`✓ Event enqueued (ID: ${crashEventId})`)
 console.log(`  Queue size: ${queue.size()}`)

@@ -160,6 +160,11 @@ test('ControlPlaneServer: POST /events ingests event', async () => {
     // Verify execution was recorded
     const executions = await executionStore.all()
     assert.ok(executions.length > 0)
+    
+    // Verify modelVersion is tracked
+    const execution = executions[0]
+    assert.ok(execution.modelVersion)
+    assert.equal(execution.modelVersion, 'latest')
   } finally {
     worker.stop()
     await server.stop()

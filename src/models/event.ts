@@ -4,4 +4,7 @@ export type RuntimeEvent = {
   entityType: string
   type: string
   payload: unknown
+  headers?: {
+    modelVersion?: string  // Optional override for model version
+  }
 }

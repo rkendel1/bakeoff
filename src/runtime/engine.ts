@@ -29,7 +29,7 @@ export class RuntimeEngine {
     private readonly initialState = 'draft'
   ) {}
 
-  async ingest(event: RuntimeEvent): Promise<void> {
+  async ingest(event: RuntimeEvent, modelVersion?: string): Promise<void> {
     this.dispatcher.enqueue(event)
 
     while (this.dispatcher.hasPending()) {
@@ -48,6 +48,7 @@ export class RuntimeEngine {
         tenantId: currentEvent.tenantId,
         entityId: currentEvent.entityId,
         event: currentEvent,
+        modelVersion: modelVersion || 'latest',  // 👈 NEW FIELD - bind execution to model version
         status: 'running',
         contextSnapshot: ctx,
         createdAt: new Date()

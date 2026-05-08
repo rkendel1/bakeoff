@@ -53,7 +53,7 @@ test('DurableExecutionQueue: enqueue adds event in queued state', () => {
     payload: {}
   }
   
-  const id = queue.enqueue(event)
+  const id = queue.enqueue(event, 'latest')
   
   assert.ok(id)
   assert.equal(queue.size(), 1)
@@ -76,7 +76,7 @@ test('DurableExecutionQueue: dequeue returns event but does not remove it', () =
     payload: {}
   }
   
-  const id = queue.enqueue(event)
+  const id = queue.enqueue(event, 'latest')
   const queuedEvent = queue.dequeue()
   
   assert.ok(queuedEvent)
@@ -95,7 +95,7 @@ test('DurableExecutionQueue: ack removes event from queue', () => {
     payload: {}
   }
   
-  const id = queue.enqueue(event)
+  const id = queue.enqueue(event, 'latest')
   queue.ack(id)
   
   assert.equal(queue.size(), 0)
@@ -113,7 +113,7 @@ test('DurableExecutionQueue: fail marks event as failed', () => {
     payload: {}
   }
   
-  const id = queue.enqueue(event)
+  const id = queue.enqueue(event, 'latest')
   queue.markProcessing(id)
   queue.fail(id, new Error('Test failure'))
   
@@ -134,7 +134,7 @@ test('DurableExecutionQueue: retry schedules event for retry with backoff', asyn
     payload: {}
   }
   
-  const id = queue.enqueue(event)
+  const id = queue.enqueue(event, 'latest')
   queue.markProcessing(id)
   queue.fail(id, new Error('Test failure'))
   queue.retry(id)
@@ -169,7 +169,7 @@ test('DurableExecutionQueue: retry sends to DLQ after max attempts', () => {
     payload: {}
   }
   
-  const id = queue.enqueue(event)
+  const id = queue.enqueue(event, 'latest')
   
   // Attempt 1
   queue.markProcessing(id)
@@ -212,7 +212,7 @@ test('DurableExecutionQueue: markProcessing increments attempts', () => {
     payload: {}
   }
   
-  const id = queue.enqueue(event)
+  const id = queue.enqueue(event, 'latest')
   
   let queuedEvent = queue.get(id)
   assert.ok(queuedEvent)
@@ -254,7 +254,7 @@ test('RuntimeWorker: successful execution acks event', async () => {
     payload: {}
   }
   
-  queue.enqueue(event)
+  queue.enqueue(event, 'latest')
   
   worker.start()
   
@@ -295,7 +295,7 @@ test('RuntimeWorker: failed execution retries up to 3 times', async () => {
     payload: {}
   }
   
-  const id = queue.enqueue(event)
+  const id = queue.enqueue(event, 'latest')
   
   worker.start()
   
@@ -344,7 +344,7 @@ test('RuntimeWorker: crash safety - events remain in queue until ack', async () 
     payload: {}
   }
   
-  queue.enqueue(event)
+  queue.enqueue(event, 'latest')
   
   assert.equal(queue.size(), 1)
   
@@ -398,7 +398,7 @@ test('RuntimeWorker: execution lifecycle from queued to completed', async () => 
     payload: {}
   }
   
-  const id = queue.enqueue(event)
+  const id = queue.enqueue(event, 'latest')
   
   // Initial state: queued
   let queuedEvent = queue.get(id)
