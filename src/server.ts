@@ -84,11 +84,16 @@ console.log('  - GET /runtime/v1/intelligence/*')
 console.log('  - And all other runtime-core contract v1 endpoints')
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   console.log('[runtime-core] SIGTERM received, shutting down gracefully')
+  
+  // Stop worker first to prevent new work from being processed
   worker.stop()
-  server.stop().then(() => {
-    console.log('[runtime-core] server closed')
-    process.exit(0)
-  })
+  console.log('[runtime-core] worker stopped')
+  
+  // Then stop the server
+  await server.stop()
+  console.log('[runtime-core] server closed')
+  
+  process.exit(0)
 })

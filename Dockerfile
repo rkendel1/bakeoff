@@ -5,8 +5,8 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Install dependencies
-COPY package.json package-lock.json* ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 
 # Copy source
 COPY . .
@@ -19,3 +19,4 @@ EXPOSE 8080
 
 # Start runtime-core HTTP server
 CMD ["npm", "run", "start:prod"]
+
