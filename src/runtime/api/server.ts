@@ -1,4 +1,5 @@
 import http from 'node:http'
+import { timingSafeEqual } from 'node:crypto'
 import type { RuntimeEvent } from '../../models/event.js'
 import type { RuntimeEngine } from '../engine.js'
 import type { ExecutionQuery } from '../control-plane/execution-query.js'
@@ -82,6 +83,7 @@ import type {
  */
 export class ControlPlaneServer {
   private server: http.Server
+  private readonly runtimeApiKey: string | null
   private diffEngine: BehavioralDiffEngine
   private compatibilityAnalyzer: CompatibilityAnalyzer
   private migrationSimulator: MigrationSimulator
@@ -145,9 +147,11 @@ export class ControlPlaneServer {
     private readonly executionQuery: ExecutionQuery,
     private readonly inspector: RuntimeInspector,
     private readonly executionQueue: DurableExecutionQueue,
-    private readonly executionStore: ExecutionStore
+    private readonly executionStore: ExecutionStore,
+    runtimeApiKey?: string
   ) {
     this.server = http.createServer(this.handleRequest.bind(this))
+    this.runtimeApiKey = (runtimeApiKey ?? process.env.RUNTIME_API_KEY)?.trim() || null
     this.diffEngine = new BehavioralDiffEngine()
     this.compatibilityAnalyzer = new CompatibilityAnalyzer()
     this.migrationSimulator = new MigrationSimulator()
@@ -316,7 +320,7 @@ export class ControlPlaneServer {
     // Set CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Runtime-Api-Key, X-API-Key')
 
     // Handle preflight
     if (req.method === 'OPTIONS') {
@@ -354,6 +358,13 @@ export class ControlPlaneServer {
           },
           documentation: 'https://github.com/rkendel1/bakeoff'
         }))
+        return
+      }
+
+      // Runtime API key protection for non-public endpoints when configured
+      if (this.requiresApiKey(pathname) && !this.isAuthorizedRequest(req)) {
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Unauthorized' }))
         return
       }
       
@@ -2274,6 +2285,72 @@ export class ControlPlaneServer {
       
       req.on('error', reject)
     })
+  }
+
+  /**
+   * Determine if a request path requires API key authentication
+   */
+  private requiresApiKey(pathname: string): boolean {
+    if (!this.runtimeApiKey) {
+      return false
+    }
+
+    return pathname !== '/health' && pathname !== '/'
+  }
+
+  /**
+   * Validate runtime API key from request headers
+   */
+  private isAuthorizedRequest(req: http.IncomingMessage): boolean {
+    if (!this.runtimeApiKey) {
+      return true
+    }
+
+    const providedApiKey = this.extractApiKey(req)
+    if (!providedApiKey) {
+      return false
+    }
+
+    return this.apiKeysMatch(this.runtimeApiKey, providedApiKey)
+  }
+
+  /**
+   * Extract API key from supported headers
+   */
+  private extractApiKey(req: http.IncomingMessage): string | null {
+    const runtimeApiKeyHeader = req.headers['x-runtime-api-key']
+    if (typeof runtimeApiKeyHeader === 'string' && runtimeApiKeyHeader.trim()) {
+      return runtimeApiKeyHeader.trim()
+    }
+
+    const apiKeyHeader = req.headers['x-api-key']
+    if (typeof apiKeyHeader === 'string' && apiKeyHeader.trim()) {
+      return apiKeyHeader.trim()
+    }
+
+    const authorizationHeader = req.headers.authorization
+    if (typeof authorizationHeader === 'string') {
+      const [scheme, token] = authorizationHeader.split(' ', 2)
+      if (scheme?.toLowerCase() === 'bearer' && token?.trim()) {
+        return token.trim()
+      }
+    }
+
+    return null
+  }
+
+  /**
+   * Constant-time API key comparison
+   */
+  private apiKeysMatch(expected: string, provided: string): boolean {
+    const expectedBuffer = Buffer.from(expected)
+    const providedBuffer = Buffer.from(provided)
+
+    if (expectedBuffer.length !== providedBuffer.length) {
+      return false
+    }
+
+    return timingSafeEqual(expectedBuffer, providedBuffer)
   }
 
   /**
