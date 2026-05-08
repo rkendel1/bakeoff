@@ -53,6 +53,16 @@ import { CalibrationAwareRiskEngineWrapper } from '../predictive/decision/Calibr
 import { StrategyBiasInjector } from '../predictive/decision/StrategyBiasInjector.js'
 import { DecisionTimeCalibrationEngine } from '../predictive/decision/DecisionTimeCalibrationEngine.js'
 import { ExecutionPlanRewriter } from '../predictive/decision/ExecutionPlanRewriter.js'
+import { RuntimeCoreContractHandler } from './contract-handler.js'
+import type {
+  IntentRequest,
+  DecisionContextRequest,
+  DecisionEvaluationRequest,
+  ObservationRequest,
+  IntelligenceForecastRequest,
+  IntelligenceLearningRequest,
+  IntelligenceRecommendationRequest
+} from './contract-types.js'
 
 /**
  * ControlPlaneServer - HTTP API server for the runtime control plane
@@ -125,6 +135,9 @@ export class ControlPlaneServer {
   private strategyBiasInjector: StrategyBiasInjector
   private decisionTimeCalibration: DecisionTimeCalibrationEngine
   private executionPlanRewriter: ExecutionPlanRewriter
+
+  // Runtime-Core Contract v1 Handler
+  private contractHandler: RuntimeCoreContractHandler
 
   constructor(
     private readonly registry: TenantRuntimeRegistry,
@@ -253,6 +266,21 @@ export class ControlPlaneServer {
     this.executionPlanRewriter = new ExecutionPlanRewriter(
       this.planRewriteAuditStore
     )
+    
+    // Initialize Runtime-Core Contract v1 Handler
+    this.contractHandler = new RuntimeCoreContractHandler(
+      this.goalPlanner,
+      this.planSynthesizer,
+      this.predictiveRiskEngine,
+      this.completionForecaster,
+      this.executionStore,
+      this.intentGraph,
+      this.memoryStore,
+      this.recommendationEngine,
+      this.registry,
+      this.forecastStore,
+      this.strategyOutcomeStore
+    )
   }
 
   /**
@@ -362,6 +390,29 @@ export class ControlPlaneServer {
         await this.handleDecisionEvaluate(req, res)
       } else if (req.method === 'GET' && pathname === '/predictive/plan-rewrites') {
         await this.handlePlanRewrites(req, res, url)
+      
+      // ═══════════════════════════════════════════════════════════════════════
+      // Runtime-Core Contract v1 Endpoints
+      // ═══════════════════════════════════════════════════════════════════════
+      } else if (req.method === 'POST' && pathname === '/runtime/v1/intent') {
+        await this.handleContractIntent(req, res)
+      } else if (req.method === 'GET' && pathname === '/runtime/v1/decision/context') {
+        await this.handleContractDecisionContext(req, res, url)
+      } else if (req.method === 'POST' && pathname === '/runtime/v1/decision/evaluate') {
+        await this.handleContractDecisionEvaluate(req, res)
+      } else if (req.method === 'GET' && pathname.startsWith('/runtime/v1/execution/') && pathname.endsWith('/trace')) {
+        await this.handleContractExecutionTrace(req, res, pathname)
+      } else if (req.method === 'POST' && pathname.match(/^\/runtime\/v1\/execution\/[^/]+\/observe$/)) {
+        await this.handleContractExecutionObserve(req, res, pathname)
+      } else if (req.method === 'GET' && pathname.startsWith('/runtime/v1/execution/')) {
+        await this.handleContractExecutionStatus(req, res, pathname)
+      } else if (req.method === 'GET' && pathname === '/runtime/v1/intelligence/forecast') {
+        await this.handleContractIntelligenceForecast(req, res, url)
+      } else if (req.method === 'GET' && pathname === '/runtime/v1/intelligence/learning') {
+        await this.handleContractIntelligenceLearning(req, res, url)
+      } else if (req.method === 'GET' && pathname === '/runtime/v1/intelligence/recommendations') {
+        await this.handleContractIntelligenceRecommendations(req, res, url)
+      
       } else {
         res.writeHead(404, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Not found' }))
@@ -2158,5 +2209,365 @@ export class ControlPlaneServer {
       
       req.on('error', reject)
     })
+  }
+
+  /**
+   * ═══════════════════════════════════════════════════════════════════════════
+   * Helper Methods
+   * ═══════════════════════════════════════════════════════════════════════════
+   */
+
+  /**
+   * Parse request body as JSON
+   */
+  private async parseRequestBody<T>(req: http.IncomingMessage): Promise<T> {
+    return new Promise((resolve, reject) => {
+      let body = ''
+      
+      req.on('data', (chunk) => {
+        body += chunk.toString()
+        
+        // Prevent excessive body size
+        if (body.length > 1e6) {
+          req.socket.destroy()
+          reject(new Error('Request body too large'))
+          return
+        }
+      })
+      
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(body) as T
+          resolve(parsed)
+        } catch (error) {
+          reject(new Error('Invalid JSON in request body'))
+        }
+      })
+      
+      req.on('error', reject)
+    })
+  }
+
+  /**
+   * ═══════════════════════════════════════════════════════════════════════════
+   * Runtime-Core Contract v1 Handlers
+   * ═══════════════════════════════════════════════════════════════════════════
+   */
+
+  /**
+   * POST /runtime/v1/intent - Intent Ingestion (Domain A)
+   */
+  private async handleContractIntent(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    try {
+      const requestBody = await this.parseRequestBody<IntentRequest>(req)
+      const response = await this.contractHandler.handleIntent(requestBody)
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(response))
+    } catch (error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: { 
+          code: 'INVALID_INTENT', 
+          message: error instanceof Error ? error.message : 'Invalid request' 
+        } 
+      }))
+    }
+  }
+
+  /**
+   * GET /runtime/v1/decision/context - Decision Context (Domain B)
+   */
+  private async handleContractDecisionContext(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    try {
+      const tenantId = url.searchParams.get('tenantId')
+      const goalId = url.searchParams.get('goalId')
+
+      if (!tenantId || !goalId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ 
+          error: { code: 'INVALID_REQUEST', message: 'Missing tenantId or goalId' } 
+        }))
+        return
+      }
+
+      const request: DecisionContextRequest = { tenantId, goalId }
+      const response = await this.contractHandler.handleDecisionContext(request)
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(response))
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: { 
+          code: 'INTERNAL_ERROR', 
+          message: error instanceof Error ? error.message : 'Internal error' 
+        } 
+      }))
+    }
+  }
+
+  /**
+   * POST /runtime/v1/decision/evaluate - Decision Evaluation (Domain B)
+   */
+  private async handleContractDecisionEvaluate(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    try {
+      const requestBody = await this.parseRequestBody<DecisionEvaluationRequest>(req)
+      const response = await this.contractHandler.handleDecisionEvaluate(requestBody)
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(response))
+    } catch (error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: { 
+          code: 'INVALID_REQUEST', 
+          message: error instanceof Error ? error.message : 'Invalid request' 
+        } 
+      }))
+    }
+  }
+
+  /**
+   * GET /runtime/v1/execution/{executionId} - Execution Status (Domain C)
+   */
+  private async handleContractExecutionStatus(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    pathname: string
+  ): Promise<void> {
+    try {
+      const executionId = pathname.split('/').pop()
+      if (!executionId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ 
+          error: { code: 'INVALID_REQUEST', message: 'Missing executionId' } 
+        }))
+        return
+      }
+
+      const response = await this.contractHandler.handleExecutionStatus(executionId)
+      if (!response) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ 
+          error: { code: 'EXECUTION_NOT_FOUND', message: 'Execution not found' } 
+        }))
+        return
+      }
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(response))
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: { 
+          code: 'INTERNAL_ERROR', 
+          message: error instanceof Error ? error.message : 'Internal error' 
+        } 
+      }))
+    }
+  }
+
+  /**
+   * GET /runtime/v1/execution/{executionId}/trace - Execution Trace (Domain C)
+   */
+  private async handleContractExecutionTrace(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    pathname: string
+  ): Promise<void> {
+    try {
+      const executionId = pathname.split('/')[4]
+      if (!executionId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ 
+          error: { code: 'INVALID_REQUEST', message: 'Missing executionId' } 
+        }))
+        return
+      }
+
+      const response = await this.contractHandler.handleExecutionTrace(executionId)
+      if (!response) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ 
+          error: { code: 'EXECUTION_NOT_FOUND', message: 'Execution not found' } 
+        }))
+        return
+      }
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(response))
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: { 
+          code: 'INTERNAL_ERROR', 
+          message: error instanceof Error ? error.message : 'Internal error' 
+        } 
+      }))
+    }
+  }
+
+  /**
+   * POST /runtime/v1/execution/{executionId}/observe - Send Observations (Domain C)
+   */
+  private async handleContractExecutionObserve(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    pathname: string
+  ): Promise<void> {
+    try {
+      const executionId = pathname.split('/')[4]
+      if (!executionId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ 
+          error: { code: 'INVALID_REQUEST', message: 'Missing executionId' } 
+        }))
+        return
+      }
+
+      const requestBody = await this.parseRequestBody<ObservationRequest>(req)
+      const response = await this.contractHandler.handleObservation(executionId, requestBody)
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(response))
+    } catch (error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: { 
+          code: 'INVALID_REQUEST', 
+          message: error instanceof Error ? error.message : 'Invalid request' 
+        } 
+      }))
+    }
+  }
+
+  /**
+   * GET /runtime/v1/intelligence/forecast - Intelligence Forecast (Domain D)
+   */
+  private async handleContractIntelligenceForecast(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    try {
+      const tenantId = url.searchParams.get('tenantId')
+      const forecastType = url.searchParams.get('forecastType')
+      const forecastHorizon = url.searchParams.get('forecastHorizon')
+
+      if (!tenantId || !forecastType || !forecastHorizon) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ 
+          error: { code: 'INVALID_REQUEST', message: 'Missing required parameters' } 
+        }))
+        return
+      }
+
+      const request: IntelligenceForecastRequest = {
+        tenantId,
+        forecastType: forecastType as any,
+        forecastHorizon: forecastHorizon as any
+      }
+      const response = await this.contractHandler.handleIntelligenceForecast(request)
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(response))
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: { 
+          code: 'INTERNAL_ERROR', 
+          message: error instanceof Error ? error.message : 'Internal error' 
+        } 
+      }))
+    }
+  }
+
+  /**
+   * GET /runtime/v1/intelligence/learning - Intelligence Learning (Domain D)
+   */
+  private async handleContractIntelligenceLearning(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    try {
+      const tenantId = url.searchParams.get('tenantId')
+      const learningType = url.searchParams.get('learningType')
+
+      if (!tenantId || !learningType) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ 
+          error: { code: 'INVALID_REQUEST', message: 'Missing required parameters' } 
+        }))
+        return
+      }
+
+      const request: IntelligenceLearningRequest = {
+        tenantId,
+        learningType: learningType as any
+      }
+      const response = await this.contractHandler.handleIntelligenceLearning(request)
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(response))
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: { 
+          code: 'INTERNAL_ERROR', 
+          message: error instanceof Error ? error.message : 'Internal error' 
+        } 
+      }))
+    }
+  }
+
+  /**
+   * GET /runtime/v1/intelligence/recommendations - Intelligence Recommendations (Domain D)
+   */
+  private async handleContractIntelligenceRecommendations(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    try {
+      const tenantId = url.searchParams.get('tenantId')
+      const recommendationType = url.searchParams.get('recommendationType')
+
+      if (!tenantId || !recommendationType) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ 
+          error: { code: 'INVALID_REQUEST', message: 'Missing required parameters' } 
+        }))
+        return
+      }
+
+      const request: IntelligenceRecommendationRequest = {
+        tenantId,
+        recommendationType: recommendationType as any
+      }
+      const response = await this.contractHandler.handleIntelligenceRecommendations(request)
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(response))
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: { 
+          code: 'INTERNAL_ERROR', 
+          message: error instanceof Error ? error.message : 'Internal error' 
+        } 
+      }))
+    }
   }
 }
