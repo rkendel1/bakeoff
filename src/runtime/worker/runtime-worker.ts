@@ -1,23 +1,25 @@
 import type { RuntimeEngine } from '../engine.js'
-import type { ExecutionQueue } from '../queue/execution-queue.js'
+import type { DurableExecutionQueue } from '../queue/durable-execution-queue.js'
 
 /**
  * RuntimeWorker - Execution Plane Component
  * 
- * This is the data plane executor that continuously polls the ExecutionQueue
- * and processes events through the RuntimeEngine.
+ * This is the data plane executor that continuously polls the DurableExecutionQueue
+ * and processes events through the RuntimeEngine with acknowledged execution semantics.
  * 
  * Responsibilities:
  * - Poll queue for new events
- * - Execute events through RuntimeEngine
- * - Handle execution errors
+ * - Execute events through RuntimeEngine with ack/fail semantics
+ * - Handle execution errors with retry logic
  * - Manage worker lifecycle
+ * - Ensure execution guarantees (ack on success, retry on failure)
  * 
  * This separation enables:
  * - Independent scaling of control plane (API) and execution plane (workers)
  * - Worker pool management
  * - Execution isolation
  * - Resource management per worker
+ * - Crash safety (events remain in queue until acknowledged)
  */
 export class RuntimeWorker {
   private running = false
@@ -25,7 +27,7 @@ export class RuntimeWorker {
   private processing = false // Prevent concurrent batch processing
 
   constructor(
-    private readonly queue: ExecutionQueue,
+    private readonly queue: DurableExecutionQueue,
     private readonly engines: Map<string, RuntimeEngine>,
     private readonly pollIntervalMs: number = 100
   ) {}
@@ -68,7 +70,7 @@ export class RuntimeWorker {
 
   /**
    * Process a batch of events from the queue
-   * Prevents concurrent execution to avoid overlapping batches
+   * Implements acknowledged execution with retry semantics
    */
   private async processBatch(): Promise<void> {
     // Skip if already processing to prevent concurrent execution
@@ -80,30 +82,51 @@ export class RuntimeWorker {
     
     try {
       while (this.queue.hasPending() && this.running) {
-        const event = this.queue.dequeue()
+        const job = this.queue.dequeue()
         
-        if (!event) {
+        if (!job) {
           break
         }
 
         try {
+          // Mark as processing (increments attempts)
+          this.queue.markProcessing(job.id)
+
           // Get the engine for this tenant
-          const engine = this.engines.get(event.tenantId)
+          const engine = this.engines.get(job.event.tenantId)
           
           if (!engine) {
-            console.error('[worker] No engine found for tenant', { tenantId: event.tenantId })
+            const error = `No engine found for tenant: ${job.event.tenantId}`
+            console.error('[worker]', error)
+            this.queue.fail(job.id, error)
+            // Don't retry configuration errors - send directly to DLQ
+            // This requires manual intervention to fix
+            const dlq = this.queue.getDeadLetterQueue()
+            dlq.add(job.event, error, job.attempts)
+            this.queue.ack(job.id) // Remove from queue since it's in DLQ
             continue
           }
 
           // Execute the event through the runtime engine
-          await engine.ingest(event)
+          await engine.ingest(job.event)
+
+          // Acknowledge successful execution
+          this.queue.ack(job.id)
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          
           console.error('[worker] Event execution failed', {
-            event,
-            error: error instanceof Error ? error.message : String(error)
+            jobId: job.id,
+            event: job.event,
+            attempt: job.attempts + 1,
+            error: errorMessage
           })
-          // Event execution failures are already tracked in ExecutionStore
-          // Worker continues processing other events
+
+          // Mark as failed
+          this.queue.fail(job.id, errorMessage)
+
+          // Retry if under max attempts
+          this.queue.retry(job.id)
         }
       }
     } finally {

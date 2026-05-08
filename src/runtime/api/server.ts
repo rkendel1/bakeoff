@@ -6,7 +6,7 @@ import type { RuntimeInspector } from '../control-plane/inspector.js'
 import type { TenantRuntimeRegistry } from '../registry/tenant-registry.js'
 import type { ExecutionRecord } from '../store/execution-record.js'
 import { simulate } from '../simulate/simulation-engine.js'
-import type { ExecutionQueue } from '../queue/execution-queue.js'
+import type { DurableExecutionQueue } from '../queue/durable-execution-queue.js'
 
 /**
  * ControlPlaneServer - HTTP API server for the runtime control plane
@@ -21,8 +21,8 @@ import type { ExecutionQueue } from '../queue/execution-queue.js'
  * 
  * Architecture:
  * - Control Plane (this server): Receives events and enqueues them
- * - Execution Queue: Decouples ingestion from execution
- * - Execution Plane (RuntimeWorker): Processes events from queue
+ * - Execution Queue: Decouples ingestion from execution with durability
+ * - Execution Plane (RuntimeWorker): Processes events from queue with ack semantics
  */
 export class ControlPlaneServer {
   private server: http.Server
@@ -32,7 +32,7 @@ export class ControlPlaneServer {
     private readonly engines: Map<string, RuntimeEngine>,
     private readonly executionQuery: ExecutionQuery,
     private readonly inspector: RuntimeInspector,
-    private readonly executionQueue: ExecutionQueue
+    private readonly executionQueue: DurableExecutionQueue
   ) {
     this.server = http.createServer(this.handleRequest.bind(this))
   }
