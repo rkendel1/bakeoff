@@ -3,7 +3,8 @@ import type { TenantModelVersion } from '../models/model-version.js'
 
 /**
  * ModelVersion - Represents a versioned tenant model
- * @deprecated Use TenantModelVersion instead
+ * @deprecated Use TenantModelVersion from /runtime/models/model-version.ts instead.
+ * This type will be removed in v8.0 once all consumers have migrated.
  */
 export type ModelVersion = {
   version: string

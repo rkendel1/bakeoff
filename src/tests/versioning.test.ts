@@ -82,7 +82,8 @@ test('RuntimeEngine: execution records include modelVersion', async () => {
   
   // Verify execution has modelVersion
   const executions = await executionStore.all()
-  assert.equal(executions.length, 2) // document.uploaded + signature.completed
+  // Note: demoTenant produces 2 executions: document.uploaded + signature.completed (emitted)
+  assert.equal(executions.length, 2)
   assert.equal(executions[0].modelVersion, 'v1.0')
 })
 
@@ -113,7 +114,8 @@ test('RuntimeEngine: execution defaults to latest version when not specified', a
   
   // Verify execution defaults to 'latest'
   const executions = await executionStore.all()
-  assert.equal(executions.length, 2) // document.uploaded + signature.completed
+  // Note: demoTenant produces 2 executions: document.uploaded + signature.completed (emitted)
+  assert.equal(executions.length, 2)
   assert.equal(executions[0].modelVersion, 'latest')
 })
 
@@ -202,8 +204,10 @@ test('Versioned execution: same event, different model versions produce differen
   const execsV1 = await storeV1.all()
   const execsV2 = await storeV2.all()
   
-  assert.equal(execsV1.length, 2) // document.uploaded + signature.completed
-  assert.equal(execsV2.length, 2) // document.uploaded + signature.completed
+  // Note: Both models produce 2 executions despite different transitions
+  // because they share the same first transition (document.uploaded → pending_signature)
+  assert.equal(execsV1.length, 2)
+  assert.equal(execsV2.length, 2)
   assert.equal(execsV1[0].modelVersion, 'v1.0')
   assert.equal(execsV2[0].modelVersion, 'v2.0')
   
