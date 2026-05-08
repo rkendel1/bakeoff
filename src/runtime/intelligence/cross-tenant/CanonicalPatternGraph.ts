@@ -212,7 +212,12 @@ export class CanonicalPatternGraph {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
       return `pattern_${crypto.randomUUID()}`
     }
-    // Fallback for older Node.js versions
-    return `pattern_${Date.now()}_${Math.random().toString(36).substring(7)}_${Math.random().toString(36).substring(7)}`
+    // More robust fallback: combine timestamp, process PID, and multiple random values
+    const timestamp = Date.now()
+    const pid = typeof process !== 'undefined' && process.pid ? process.pid : 0
+    const rand1 = Math.random().toString(36).substring(2)
+    const rand2 = Math.random().toString(36).substring(2)
+    const rand3 = Math.random().toString(36).substring(2)
+    return `pattern_${timestamp}_${pid}_${rand1}${rand2}${rand3}`
   }
 }

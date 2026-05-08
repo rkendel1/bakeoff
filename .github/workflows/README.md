@@ -125,8 +125,8 @@ flyctl logs -a bakeoff-1
 
 ### Test Failures
 
-Tests run with `continue-on-error: true`, so they won't block deployment.
-However, you should still fix failing tests:
+Tests run with `npm test` and will block deployment if they fail.
+Fix failing tests locally before pushing:
 ```bash
 npm test
 ```
