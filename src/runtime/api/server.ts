@@ -36,6 +36,15 @@ import { GoalCompletionForecaster } from '../predictive/GoalCompletionForecaster
 import { EntropyTrajectoryForecaster } from '../predictive/EntropyTrajectoryForecaster.js'
 import { PredictiveRiskEngine } from '../predictive/PredictiveRiskEngine.js'
 import { PredictiveGovernanceEngine } from '../predictive/PredictiveGovernanceEngine.js'
+import { ForecastOutcomeStore } from '../predictive/calibration/ForecastOutcomeStore.js'
+import { CalibrationStore } from '../predictive/calibration/CalibrationStore.js'
+import { PredictionAccuracyStore } from '../predictive/calibration/PredictionAccuracyStore.js'
+import { ForecastOutcomeTracker } from '../predictive/calibration/ForecastOutcomeTracker.js'
+import { PredictionAccuracyAnalyzer } from '../predictive/calibration/PredictionAccuracyAnalyzer.js'
+import { AdaptiveConfidenceScaler } from '../predictive/calibration/AdaptiveConfidenceScaler.js'
+import { PredictionDriftDetector } from '../predictive/calibration/PredictionDriftDetector.js'
+import { SelfHealingForecastAdjuster } from '../predictive/calibration/SelfHealingForecastAdjuster.js'
+import { ForecastCalibrationEngine } from '../predictive/calibration/ForecastCalibrationEngine.js'
 
 /**
  * ControlPlaneServer - HTTP API server for the runtime control plane
@@ -87,6 +96,17 @@ export class ControlPlaneServer {
   private entropyForecaster: EntropyTrajectoryForecaster
   private predictiveRiskEngine: PredictiveRiskEngine
   private predictiveGovernance: PredictiveGovernanceEngine
+  
+  // Calibration Layer
+  private forecastOutcomeStore: ForecastOutcomeStore
+  private calibrationStore: CalibrationStore
+  private predictionAccuracyStore: PredictionAccuracyStore
+  private forecastOutcomeTracker: ForecastOutcomeTracker
+  private predictionAccuracyAnalyzer: PredictionAccuracyAnalyzer
+  private adaptiveConfidenceScaler: AdaptiveConfidenceScaler
+  private predictionDriftDetector: PredictionDriftDetector
+  private selfHealingAdjuster: SelfHealingForecastAdjuster
+  private forecastCalibrationEngine: ForecastCalibrationEngine
 
   constructor(
     private readonly registry: TenantRuntimeRegistry,
@@ -157,6 +177,37 @@ export class ControlPlaneServer {
     this.predictiveGovernance = new PredictiveGovernanceEngine(
       this.predictiveRiskEngine,
       this.policyEngine
+    )
+    
+    // Initialize Calibration Layer
+    this.forecastOutcomeStore = new ForecastOutcomeStore()
+    this.calibrationStore = new CalibrationStore()
+    this.predictionAccuracyStore = new PredictionAccuracyStore()
+    this.forecastOutcomeTracker = new ForecastOutcomeTracker(this.forecastOutcomeStore)
+    this.predictionAccuracyAnalyzer = new PredictionAccuracyAnalyzer(
+      this.forecastOutcomeStore,
+      this.predictionAccuracyStore
+    )
+    this.adaptiveConfidenceScaler = new AdaptiveConfidenceScaler(
+      this.calibrationStore,
+      this.predictionAccuracyStore
+    )
+    this.predictionDriftDetector = new PredictionDriftDetector(
+      this.forecastOutcomeStore,
+      this.predictionAccuracyStore
+    )
+    this.selfHealingAdjuster = new SelfHealingForecastAdjuster(
+      this.calibrationStore,
+      this.predictionDriftDetector,
+      this.predictionAccuracyStore
+    )
+    this.forecastCalibrationEngine = new ForecastCalibrationEngine(
+      this.forecastOutcomeTracker,
+      this.predictionAccuracyAnalyzer,
+      this.adaptiveConfidenceScaler,
+      this.predictionDriftDetector,
+      this.selfHealingAdjuster,
+      this.calibrationStore
     )
   }
 
@@ -255,6 +306,12 @@ export class ControlPlaneServer {
         await this.handlePredictiveEntropyForecast(req, res, url)
       } else if (req.method === 'POST' && pathname === '/predictive/recalculate') {
         await this.handlePredictiveRecalculate(req, res)
+      } else if (req.method === 'GET' && pathname === '/predictive/accuracy') {
+        await this.handlePredictiveAccuracy(req, res, url)
+      } else if (req.method === 'POST' && pathname === '/predictive/calibrate') {
+        await this.handlePredictiveCalibrate(req, res)
+      } else if (req.method === 'GET' && pathname === '/predictive/drift') {
+        await this.handlePredictiveDrift(req, res, url)
       } else {
         res.writeHead(404, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Not found' }))
@@ -1630,6 +1687,219 @@ export class ControlPlaneServer {
       res.writeHead(500, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         error: error instanceof Error ? error.message : 'Failed to recalculate forecasts'
+      }))
+    }
+  }
+
+  /**
+   * GET /predictive/accuracy - Get prediction accuracy metrics
+   * 
+   * Query params:
+   * - tenantId: required
+   * 
+   * Returns:
+   * {
+   *   "overallAccuracy": 0.84,
+   *   "bias": "overconfident",
+   *   "modelDrift": {
+   *     "riskEngine": 0.12,
+   *     "entropyForecaster": 0.18
+   *   },
+   *   "modelAccuracies": [
+   *     {
+   *       "modelType": "risk_engine",
+   *       "accuracy": 0.83,
+   *       "bias": "overconfident",
+   *       "sampleSize": 45
+   *     }
+   *   ]
+   * }
+   */
+  private async handlePredictiveAccuracy(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Missing required parameter: tenantId' }))
+      return
+    }
+
+    try {
+      // Get accuracy metrics for all models
+      const accuracyMetrics = await this.predictionAccuracyAnalyzer.analyzeAllModels(tenantId)
+
+      // Get drift information
+      const driftResults = await this.predictionDriftDetector.detectAllDrift(tenantId)
+
+      // Calculate overall accuracy
+      const overallAccuracy = accuracyMetrics.length > 0
+        ? accuracyMetrics.reduce((sum, m) => sum + m.overallAccuracy, 0) / accuracyMetrics.length
+        : 0
+
+      // Determine overall bias (majority)
+      const biasCounts = accuracyMetrics.reduce((counts, m) => {
+        counts[m.bias] = (counts[m.bias] || 0) + 1
+        return counts
+      }, {} as Record<string, number>)
+      const overallBias = Object.entries(biasCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'calibrated'
+
+      // Build model drift map
+      const modelDrift: Record<string, number> = {}
+      for (const drift of driftResults) {
+        modelDrift[drift.modelType] = drift.driftMagnitude
+      }
+
+      const response = {
+        tenantId,
+        overallAccuracy,
+        bias: overallBias,
+        modelDrift,
+        modelAccuracies: accuracyMetrics.map((m) => ({
+          modelType: m.modelType,
+          accuracy: m.overallAccuracy,
+          bias: m.bias,
+          sampleSize: m.sampleSize,
+          brierScore: m.brierScore,
+          calibrationError: m.calibrationError
+        })),
+        computedAt: new Date()
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(response))
+    } catch (error) {
+      console.error('Error getting accuracy metrics:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to get accuracy metrics'
+      }))
+    }
+  }
+
+  /**
+   * POST /predictive/calibrate - Trigger full recalibration cycle
+   * 
+   * Body:
+   * {
+   *   "tenantId": "t1"
+   * }
+   * 
+   * Returns:
+   * {
+   *   "calibrationReport": {
+   *     "overallCalibrationHealth": "good",
+   *     "systemAccuracy": 0.84,
+   *     "modelStatus": [...],
+   *     "recentAdjustments": [...],
+   *     "recommendations": [...]
+   *   }
+   * }
+   */
+  private async handlePredictiveCalibrate(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    try {
+      const body = await this.readBody(req)
+      const data = JSON.parse(body)
+
+      if (!data.tenantId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Missing required field: tenantId' }))
+        return
+      }
+
+      // Perform full calibration
+      const calibrationReport = await this.forecastCalibrationEngine.performFullCalibration(
+        data.tenantId
+      )
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        message: 'Calibration complete',
+        calibrationReport
+      }))
+    } catch (error) {
+      console.error('Error performing calibration:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to perform calibration'
+      }))
+    }
+  }
+
+  /**
+   * GET /predictive/drift - Get forecasting drift metrics
+   * 
+   * Query params:
+   * - tenantId: required
+   * 
+   * Returns:
+   * {
+   *   "tenantId": "t1",
+   *   "driftDetections": [
+   *     {
+   *       "modelType": "risk_engine",
+   *       "driftDetected": true,
+   *       "driftMagnitude": 0.18,
+   *       "driftType": "accuracy_decline",
+   *       "recommendedAction": "recalibrate",
+   *       "urgency": "high"
+   *     }
+   *   ],
+   *   "modelsNeedingRecalibration": [...]
+   * }
+   */
+  private async handlePredictiveDrift(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Missing required parameter: tenantId' }))
+      return
+    }
+
+    try {
+      // Get drift information for all models
+      const driftResults = await this.predictionDriftDetector.detectAllDrift(tenantId)
+
+      // Get models needing recalibration
+      const modelsNeedingRecalibration = await this.predictionDriftDetector.identifyModelsNeedingRecalibration(
+        tenantId
+      )
+
+      const response = {
+        tenantId,
+        driftDetections: driftResults.map((r) => ({
+          modelType: r.modelType,
+          driftDetected: r.driftDetected,
+          driftMagnitude: r.driftMagnitude,
+          driftType: r.driftType,
+          recommendedAction: r.recommendedAction,
+          urgency: r.urgency,
+          confidence: r.confidence,
+          factors: r.factors
+        })),
+        modelsNeedingRecalibration,
+        overallDriftStatus: driftResults.some((r) => r.driftDetected) ? 'drift_detected' : 'stable',
+        detectedAt: new Date()
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(response))
+    } catch (error) {
+      console.error('Error getting drift metrics:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to get drift metrics'
       }))
     }
   }
