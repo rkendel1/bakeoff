@@ -54,7 +54,7 @@ test('Intelligence API: GET /intelligence/canonical returns topology snapshot', 
   const queue = new DurableExecutionQueue()
   const worker = new RuntimeWorker(queue, engines, 50)
   const executionQuery = new ExecutionQuery(executionStore)
-  const inspector = new RuntimeInspector(executionStore)
+  const inspector = new RuntimeInspector()
 
   const server = new ControlPlaneServer(
     registry,
@@ -128,7 +128,7 @@ test('Intelligence API: GET /intelligence/drift returns drift analysis', async (
   const queue = new DurableExecutionQueue()
   const worker = new RuntimeWorker(queue, engines, 50)
   const executionQuery = new ExecutionQuery(executionStore)
-  const inspector = new RuntimeInspector(executionStore)
+  const inspector = new RuntimeInspector()
 
   const server = new ControlPlaneServer(
     registry,
@@ -196,7 +196,7 @@ test('Intelligence API: GET /intelligence/topology returns topology evolution', 
   const queue = new DurableExecutionQueue()
   const worker = new RuntimeWorker(queue, engines, 50)
   const executionQuery = new ExecutionQuery(executionStore)
-  const inspector = new RuntimeInspector(executionStore)
+  const inspector = new RuntimeInspector()
 
   const server = new ControlPlaneServer(
     registry,
@@ -249,7 +249,7 @@ test('Intelligence API: handles missing tenantId parameter', async () => {
   const engines = new Map()
   const queue = new DurableExecutionQueue()
   const executionQuery = new ExecutionQuery(executionStore)
-  const inspector = new RuntimeInspector(executionStore)
+  const inspector = new RuntimeInspector()
 
   const server = new ControlPlaneServer(
     registry,

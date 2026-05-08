@@ -87,18 +87,14 @@ export class CanonicalInferenceEngine {
     const states = this.transitionGraph.getStates()
     const stateExecutionCounts = new Map<string, number>()
 
-    // Count how many times each state appears in execution traces
+    // Count how many times each state appears in execution context
     for (const execution of executions) {
-      const trace = execution.contextSnapshot.trace
-      for (const entry of trace) {
-        if (entry.stage === 'APPLY' && entry.context.stateUpdates) {
-          for (const update of entry.context.stateUpdates) {
-            stateExecutionCounts.set(
-              update.toState,
-              (stateExecutionCounts.get(update.toState) || 0) + 1
-            )
-          }
-        }
+      const stateUpdates = execution.contextSnapshot.stateUpdates
+      for (const update of stateUpdates) {
+        stateExecutionCounts.set(
+          update.toState,
+          (stateExecutionCounts.get(update.toState) || 0) + 1
+        )
       }
     }
 
@@ -127,29 +123,25 @@ export class CanonicalInferenceEngine {
       }
     >()
 
-    // Extract provider usage from execution traces
+    // Extract provider usage from execution context
     for (const execution of executions) {
-      const trace = execution.contextSnapshot.trace
-      for (const entry of trace) {
-        if (entry.stage === 'EXECUTE' && entry.context.plannedActions) {
-          for (const action of entry.context.plannedActions) {
-            const key = `${action.name}::${action.provider}`
-            const existing = providerMap.get(key)
+      const plannedActions = execution.contextSnapshot.plannedActions
+      for (const action of plannedActions) {
+        const key = `${action.name}::${action.provider}`
+        const existing = providerMap.get(key)
 
-            if (existing) {
-              existing.count++
-              if (execution.status === 'completed') {
-                existing.successCount++
-              }
-            } else {
-              providerMap.set(key, {
-                action: action.name,
-                provider: action.provider,
-                count: 1,
-                successCount: execution.status === 'completed' ? 1 : 0
-              })
-            }
+        if (existing) {
+          existing.count++
+          if (execution.status === 'completed') {
+            existing.successCount++
           }
+        } else {
+          providerMap.set(key, {
+            action: action.name,
+            provider: action.provider,
+            count: 1,
+            successCount: execution.status === 'completed' ? 1 : 0
+          })
         }
       }
     }

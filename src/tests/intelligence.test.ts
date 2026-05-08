@@ -49,64 +49,20 @@ function createTestExecution(
         entityId,
         fromState,
         toState,
+        eventType,
         timestamp: new Date().toISOString()
       }
     ],
     trace: [
       {
         stage: 'APPLY',
-        timestamp: new Date().toISOString(),
-        context: {
-          tenantId: 'test-tenant',
-          entityId,
-          entityType: 'document',
-          event: {
-            tenantId: 'test-tenant',
-            entityId,
-            entityType: 'document',
-            type: eventType,
-            payload: {}
-          },
-          model,
-          currentState: fromState,
-          transitions: [],
-          plannedActions: [],
-          emittedEvents: [],
-          stateUpdates: [
-            {
-              entityId,
-              fromState,
-              toState,
-              timestamp: new Date().toISOString()
-            }
-          ],
-          trace: []
-        }
+        timestamp: new Date().toISOString()
       },
       ...(actionName && providerName
         ? [
             {
               stage: 'EXECUTE' as const,
-              timestamp: new Date().toISOString(),
-              context: {
-                tenantId: 'test-tenant',
-                entityId,
-                entityType: 'document',
-                event: {
-                  tenantId: 'test-tenant',
-                  entityId,
-                  entityType: 'document',
-                  type: eventType,
-                  payload: {}
-                },
-                model,
-                currentState: fromState,
-                transitions: [],
-                plannedActions: [{ name: actionName, provider: providerName }],
-                emittedEvents: [],
-                stateUpdates: [],
-                trace: []
-              }
+              timestamp: new Date().toISOString()
             }
           ]
         : [])
