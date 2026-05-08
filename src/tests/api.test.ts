@@ -324,3 +324,112 @@ test('ControlPlaneServer: POST /simulate simulates execution', async () => {
     await server.stop()
   }
 })
+
+test('ControlPlaneServer: runtime API key blocks unauthenticated requests', async () => {
+  const registry = new TenantRuntimeRegistry()
+  registry.register('tenant-1', demoTenant)
+  
+  const executionStore = new ExecutionStore()
+  const stateStore = new StateStore()
+  const eventStore = new EventStore()
+  const executor = new Executor({ docuseal: new DocuSealAdapter() })
+  const dispatcher = new Dispatcher()
+  
+  const engine = new RuntimeEngine(
+    demoTenant,
+    stateStore,
+    eventStore,
+    executor,
+    dispatcher,
+    executionStore
+  )
+  
+  const engines = new Map([['tenant-1', engine]])
+  const query = new ExecutionQuery(executionStore)
+  const inspector = new RuntimeInspector()
+  const executionQueue = new DurableExecutionQueue()
+  const server = new ControlPlaneServer(
+    registry,
+    engines,
+    query,
+    inspector,
+    executionQueue,
+    executionStore,
+    'test-runtime-api-key'
+  )
+  await server.start(3005)
+  
+  try {
+    const response = await fetch(
+      'http://localhost:3005/executions?tenantId=tenant-1&entityId=doc-1'
+    )
+    
+    assert.equal(response.status, 401)
+    const result = await response.json()
+    assert.equal(result.error, 'Unauthorized')
+  } finally {
+    await server.stop()
+  }
+})
+
+test('ControlPlaneServer: runtime API key allows authenticated requests', async () => {
+  const registry = new TenantRuntimeRegistry()
+  registry.register('tenant-1', demoTenant)
+  
+  const executionStore = new ExecutionStore()
+  const stateStore = new StateStore()
+  const eventStore = new EventStore()
+  const executor = new Executor({ docuseal: new DocuSealAdapter() })
+  const dispatcher = new Dispatcher()
+  
+  const engine = new RuntimeEngine(
+    demoTenant,
+    stateStore,
+    eventStore,
+    executor,
+    dispatcher,
+    executionStore
+  )
+  
+  // Seed execution data
+  await engine.ingest({
+    tenantId: 'tenant-1',
+    entityId: 'doc-1',
+    entityType: 'document',
+    type: 'document.uploaded',
+    payload: {}
+  })
+  
+  const engines = new Map([['tenant-1', engine]])
+  const query = new ExecutionQuery(executionStore)
+  const inspector = new RuntimeInspector()
+  const executionQueue = new DurableExecutionQueue()
+  const server = new ControlPlaneServer(
+    registry,
+    engines,
+    query,
+    inspector,
+    executionQueue,
+    executionStore,
+    'test-runtime-api-key'
+  )
+  await server.start(3006)
+  
+  try {
+    const response = await fetch(
+      'http://localhost:3006/executions?tenantId=tenant-1&entityId=doc-1',
+      {
+        headers: {
+          Authorization: 'Bearer test-runtime-api-key'
+        }
+      }
+    )
+    
+    assert.equal(response.status, 200)
+    const result = await response.json()
+    assert.ok(result.executions)
+    assert.ok(result.executions.length > 0)
+  } finally {
+    await server.stop()
+  }
+})
