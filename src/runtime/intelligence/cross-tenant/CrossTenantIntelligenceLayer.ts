@@ -103,7 +103,11 @@ export class CrossTenantIntelligenceLayer {
    */
   private async collectTenantSnapshot(tenantId: string): Promise<TenantSnapshot | null> {
     const runtime = this.registry.get(tenantId)
-    if (!runtime) return null
+    if (!runtime) {
+      // Log collection failure without sensitive details
+      console.warn(`[CrossTenantIntelligence] Failed to get runtime for tenant (runtime not found)`)
+      return null
+    }
 
     try {
       // Collect only abstracted metrics
@@ -129,7 +133,8 @@ export class CrossTenantIntelligenceLayer {
 
       return snapshot
     } catch (error) {
-      // Silent failure - don't expose tenant issues
+      // Log collection failure without exposing tenant-specific data
+      console.warn(`[CrossTenantIntelligence] Failed to collect snapshot (error during collection)`)
       return null
     }
   }

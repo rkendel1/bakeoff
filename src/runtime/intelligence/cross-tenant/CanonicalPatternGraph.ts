@@ -208,6 +208,11 @@ export class CanonicalPatternGraph {
   }
 
   private generatePatternId(): string {
-    return `pattern_${Date.now()}_${Math.random().toString(36).substring(7)}`
+    // Use crypto.randomUUID() for globally unique IDs
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return `pattern_${crypto.randomUUID()}`
+    }
+    // Fallback for older Node.js versions
+    return `pattern_${Date.now()}_${Math.random().toString(36).substring(7)}_${Math.random().toString(36).substring(7)}`
   }
 }

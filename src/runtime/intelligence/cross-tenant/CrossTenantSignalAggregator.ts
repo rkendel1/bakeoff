@@ -112,7 +112,15 @@ export class CrossTenantSignalAggregator {
   }
 
   private hashStrategy(strategy: { type: string; [key: string]: any }): string {
-    return `strategy_${JSON.stringify(strategy).length}_${strategy.type}`
+    // Use a simple but more collision-resistant hash
+    const str = JSON.stringify(strategy)
+    let hash = 0
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Convert to 32-bit integer
+    }
+    return `strategy_${strategy.type}_${Math.abs(hash).toString(36)}`
   }
 
   private aggregateConvergence(data: TenantSnapshot[]): {

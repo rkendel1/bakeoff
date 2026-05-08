@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     name: Deploy to Fly.io
@@ -28,7 +31,6 @@ jobs:
 
       - name: Run tests
         run: npm test
-        continue-on-error: true
 
       - name: Set up Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
