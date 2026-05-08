@@ -17,6 +17,19 @@ import { RuntimeMemoryStore } from './RuntimeMemoryStore.js'
  * This is where the runtime develops "operational intuition"
  */
 export class StrategyEffectivenessAnalyzer {
+  // Learning confidence thresholds
+  private static readonly CONFIDENCE_LOW_THRESHOLD = 5
+  private static readonly CONFIDENCE_MEDIUM_THRESHOLD = 20
+  private static readonly CONFIDENCE_GOOD_THRESHOLD = 50
+  
+  private static readonly CONFIDENCE_LOW = 0.3
+  private static readonly CONFIDENCE_MEDIUM = 0.6
+  private static readonly CONFIDENCE_GOOD = 0.8
+  private static readonly CONFIDENCE_HIGH = 0.95
+  
+  // Decline detection threshold
+  private static readonly DECLINE_THRESHOLD = 0.15
+
   constructor(private readonly memoryStore: RuntimeMemoryStore) {}
 
   /**
@@ -203,10 +216,16 @@ export class StrategyEffectivenessAnalyzer {
    * - 50+ samples: high confidence (0.95)
    */
   private calculateLearningConfidence(sampleSize: number): number {
-    if (sampleSize < 5) return 0.3
-    if (sampleSize < 20) return 0.6
-    if (sampleSize < 50) return 0.8
-    return 0.95
+    if (sampleSize < StrategyEffectivenessAnalyzer.CONFIDENCE_LOW_THRESHOLD) {
+      return StrategyEffectivenessAnalyzer.CONFIDENCE_LOW
+    }
+    if (sampleSize < StrategyEffectivenessAnalyzer.CONFIDENCE_MEDIUM_THRESHOLD) {
+      return StrategyEffectivenessAnalyzer.CONFIDENCE_MEDIUM
+    }
+    if (sampleSize < StrategyEffectivenessAnalyzer.CONFIDENCE_GOOD_THRESHOLD) {
+      return StrategyEffectivenessAnalyzer.CONFIDENCE_GOOD
+    }
+    return StrategyEffectivenessAnalyzer.CONFIDENCE_HIGH
   }
 
   /**
@@ -357,7 +376,7 @@ export class StrategyEffectivenessAnalyzer {
       const avgSecond = this.calculateAverageEffectiveness(secondHalf)
 
       // Declining if second half is significantly worse
-      if (avgSecond < avgFirst - 0.15) {
+      if (avgSecond < avgFirst - StrategyEffectivenessAnalyzer.DECLINE_THRESHOLD) {
         declining.push(strategy)
       }
     }

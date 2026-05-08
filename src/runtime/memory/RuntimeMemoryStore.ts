@@ -24,6 +24,15 @@ import type {
  * - Effectiveness tracking over time
  */
 export class RuntimeMemoryStore {
+  // Effectiveness scoring weights
+  private static readonly WEIGHT_SUCCESS_RATE = 0.4
+  private static readonly WEIGHT_RETRY_REDUCTION = 0.2
+  private static readonly WEIGHT_CONVERGENCE_GAIN = 0.2
+  private static readonly WEIGHT_ENTROPY_REDUCTION = 0.2
+  
+  // Trend detection threshold
+  private static readonly TREND_CHANGE_THRESHOLD = 0.1
+
   private readonly records = new Map<string, RuntimeMemoryRecord>()
   private readonly tenantIndex = new Map<string, string[]>()
   private readonly strategyIndex = new Map<string, string[]>()  // strategy -> record IDs
@@ -189,10 +198,10 @@ export class RuntimeMemoryStore {
 
       // Overall effectiveness score (weighted average)
       const effectivenessScore = 
-        successRate * 0.4 +
-        avgRetryReduction * 0.2 +
-        avgConvergenceGain * 0.2 +
-        avgEntropyReduction * 0.2
+        successRate * RuntimeMemoryStore.WEIGHT_SUCCESS_RATE +
+        avgRetryReduction * RuntimeMemoryStore.WEIGHT_RETRY_REDUCTION +
+        avgConvergenceGain * RuntimeMemoryStore.WEIGHT_CONVERGENCE_GAIN +
+        avgEntropyReduction * RuntimeMemoryStore.WEIGHT_ENTROPY_REDUCTION
 
       // Calculate trend (compare first half vs second half)
       const trend = this.calculateTrend(groupRecords)
@@ -242,8 +251,8 @@ export class RuntimeMemoryStore {
 
     const change = avgSecond - avgFirst
 
-    if (change > 0.1) return 'improving'
-    if (change < -0.1) return 'declining'
+    if (change > RuntimeMemoryStore.TREND_CHANGE_THRESHOLD) return 'improving'
+    if (change < -RuntimeMemoryStore.TREND_CHANGE_THRESHOLD) return 'declining'
     return 'stable'
   }
 
