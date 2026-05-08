@@ -243,6 +243,10 @@ export class PredictionAccuracyAnalyzer {
     bias: 'overconfident' | 'underconfident' | 'calibrated'
     score: number
   } {
+    if (outcomes.length === 0) {
+      return { bias: 'calibrated', score: 0 }
+    }
+
     // Calculate average predicted vs actual
     let totalPredicted = 0
     let totalActual = 0
@@ -286,6 +290,10 @@ export class PredictionAccuracyAnalyzer {
    * Calculate calibration error (mean absolute error)
    */
   private calculateCalibrationError(outcomes: ForecastOutcome[]): number {
+    if (outcomes.length === 0) {
+      return 0
+    }
+
     const totalDrift = outcomes.reduce(
       (sum, o) => sum + o.errorMetrics.calibrationDrift,
       0

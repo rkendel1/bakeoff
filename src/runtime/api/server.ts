@@ -1736,8 +1736,9 @@ export class ControlPlaneServer {
       const driftResults = await this.predictionDriftDetector.detectAllDrift(tenantId)
 
       // Calculate overall accuracy
-      const overallAccuracy = 
-        accuracyMetrics.reduce((sum, m) => sum + m.overallAccuracy, 0) / accuracyMetrics.length
+      const overallAccuracy = accuracyMetrics.length > 0
+        ? accuracyMetrics.reduce((sum, m) => sum + m.overallAccuracy, 0) / accuracyMetrics.length
+        : 0
 
       // Determine overall bias (majority)
       const biasCounts = accuracyMetrics.reduce((counts, m) => {

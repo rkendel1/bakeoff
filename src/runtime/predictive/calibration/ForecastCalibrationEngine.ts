@@ -50,7 +50,8 @@ export class ForecastCalibrationEngine {
    * This is the main entry point for recalibration.
    */
   async performFullCalibration(tenantId: string): Promise<CalibrationReport> {
-    console.log(`Starting full calibration for tenant ${tenantId}`)
+    const startMessage = `Starting full calibration for tenant: ${tenantId}`
+    console.log(startMessage)
 
     // Step 1: Analyze accuracy for all models
     const accuracyMetrics = await this.accuracyAnalyzer.analyzeAllModels(tenantId)
@@ -75,7 +76,8 @@ export class ForecastCalibrationEngine {
       adjustments
     )
 
-    console.log(`Calibration complete for tenant ${tenantId}:`, {
+    const completeMessage = `Calibration complete for tenant: ${tenantId}`
+    console.log(completeMessage, {
       systemAccuracy: report.systemAccuracy,
       adjustmentsApplied: adjustments.length,
       modelsNeedingAttention: report.modelStatus.filter((m) => m.needsCalibration).length
@@ -232,8 +234,9 @@ export class ForecastCalibrationEngine {
     adjustments: Array<any>
   ): Promise<CalibrationReport> {
     // Calculate system-wide accuracy
-    const systemAccuracy =
-      accuracyMetrics.reduce((sum, m) => sum + m.overallAccuracy, 0) / accuracyMetrics.length
+    const systemAccuracy = accuracyMetrics.length > 0
+      ? accuracyMetrics.reduce((sum, m) => sum + m.overallAccuracy, 0) / accuracyMetrics.length
+      : 0
 
     // Determine overall health
     let overallHealth: CalibrationReport['overallCalibrationHealth']
