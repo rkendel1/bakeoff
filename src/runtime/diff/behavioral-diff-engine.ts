@@ -298,15 +298,11 @@ export class BehavioralDiffEngine {
       score += changes.removedStates.length * 30
       factors.push('state_removed')
       
-      // Check if removed states were terminal states
-      // Heuristic: states with no outgoing transitions are likely terminal
-      const hasTerminalStateRemoved = changes.removedStates.some(state => {
-        // This is a simplified heuristic - in production you'd analyze the full graph
-        return true
-      })
-      if (hasTerminalStateRemoved) {
-        factors.push('terminal_state_removed')
-      }
+      // TODO: Implement proper terminal state detection
+      // For now, we assume all removed states could be terminal states
+      // A proper implementation would analyze the transition graph to identify
+      // states with no outgoing transitions (actual terminal states)
+      factors.push('terminal_state_removed')
     }
 
     // High risk factors (20 points each)

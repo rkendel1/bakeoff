@@ -268,14 +268,16 @@ describe('Behavioral Diff + Migration Analysis', () => {
       // Should have one result
       assert.equal(results.length, 1)
 
-      // Should detect change - but the context snapshot already has the final state
-      // So we're comparing the FINAL states, not simulating from scratch
+      // Verify execution details
       const result = results[0]
       assert.equal(result.executionId, 'exec-1')
       
-      // The originalOutcome should be 'draft' (current state at time of snapshot)
-      // With v2 model, document.uploaded from draft goes to review_required
-      assert.ok(result.changed || !result.changed) // Accept either outcome for now
+      // NOTE: The simulation behavior depends on how the pipeline processes the event
+      // with the new model. The key is that we're testing the simulation runs without error.
+      // TODO: Strengthen this test with more specific assertions once simulation behavior
+      // is more predictable across model changes.
+      assert.ok(result.originalOutcome !== undefined)
+      assert.ok(result.predictedOutcome !== undefined)
     })
 
     it('should detect action drift', async () => {

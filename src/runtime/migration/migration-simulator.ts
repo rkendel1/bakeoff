@@ -289,7 +289,7 @@ export class MigrationSimulator {
   /**
    * Sample executions for large datasets
    * 
-   * Uses reservoir sampling for unbiased sampling
+   * Uses simple random sampling without replacement
    */
   private sampleExecutions(
     executions: ExecutionRecord[],
