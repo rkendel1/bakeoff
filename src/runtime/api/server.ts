@@ -19,6 +19,15 @@ import { RecommendationStore } from '../intelligence/recommendation/Recommendati
 import { RuntimePolicyEngine } from '../policy/RuntimePolicyEngine.js'
 import { PolicyStore } from '../policy/PolicyStore.js'
 import { GovernanceDecisionStore } from '../policy/GovernanceDecisionStore.js'
+import { IntentGraph } from '../intent/IntentGraph.js'
+import { IntentStore } from '../intent/IntentStore.js'
+import { GoalExecutionStore } from '../intent/GoalExecutionStore.js'
+import { StrategyOutcomeStore } from '../intent/StrategyOutcomeStore.js'
+import { GoalPlanner } from '../intent/GoalPlanner.js'
+import { StrategyGraph } from '../intent/StrategyGraph.js'
+import { GoalOutcomeEvaluator } from '../intent/GoalOutcomeEvaluator.js'
+import { IntentAwareGovernanceEngine } from '../intent/IntentAwareGovernanceEngine.js'
+import { OperationalPlanSynthesizer } from '../intent/OperationalPlanSynthesizer.js'
 
 /**
  * ControlPlaneServer - HTTP API server for the runtime control plane
@@ -49,6 +58,17 @@ export class ControlPlaneServer {
   private policyEngine: RuntimePolicyEngine
   private policyStore: PolicyStore
   private governanceStore: GovernanceDecisionStore
+  
+  // Intent Layer
+  private intentGraph: IntentGraph
+  private intentStore: IntentStore
+  private goalExecutionStore: GoalExecutionStore
+  private strategyOutcomeStore: StrategyOutcomeStore
+  private goalPlanner: GoalPlanner
+  private strategyGraph: StrategyGraph
+  private goalOutcomeEvaluator: GoalOutcomeEvaluator
+  private intentAwareGovernance: IntentAwareGovernanceEngine
+  private planSynthesizer: OperationalPlanSynthesizer
 
   constructor(
     private readonly registry: TenantRuntimeRegistry,
@@ -70,6 +90,31 @@ export class ControlPlaneServer {
     this.policyStore = new PolicyStore()
     this.policyEngine = new RuntimePolicyEngine(this.policyStore)
     this.governanceStore = new GovernanceDecisionStore()
+    
+    // Initialize Intent Layer
+    this.intentGraph = new IntentGraph()
+    this.intentStore = new IntentStore()
+    this.goalExecutionStore = new GoalExecutionStore()
+    this.strategyOutcomeStore = new StrategyOutcomeStore()
+    this.goalPlanner = new GoalPlanner(
+      this.intentGraph,
+      this.strategyOutcomeStore
+    )
+    this.strategyGraph = new StrategyGraph(this.intentGraph)
+    this.goalOutcomeEvaluator = new GoalOutcomeEvaluator(
+      this.strategyOutcomeStore,
+      this.intentGraph
+    )
+    this.intentAwareGovernance = new IntentAwareGovernanceEngine(
+      this.policyEngine,
+      this.intentGraph,
+      this.goalOutcomeEvaluator
+    )
+    this.planSynthesizer = new OperationalPlanSynthesizer(
+      this.intentGraph,
+      this.strategyGraph,
+      this.goalOutcomeEvaluator
+    )
   }
 
   /**
@@ -149,6 +194,14 @@ export class ControlPlaneServer {
         await this.handlePolicyGovernanceHistory(req, res, url)
       } else if (req.method === 'POST' && pathname === '/policy/rules') {
         await this.handlePolicyRules(req, res)
+      } else if (req.method === 'POST' && pathname === '/intent/goals') {
+        await this.handleIntentGoals(req, res)
+      } else if (req.method === 'GET' && pathname === '/intent/strategies') {
+        await this.handleIntentStrategies(req, res, url)
+      } else if (req.method === 'POST' && pathname === '/intent/plan') {
+        await this.handleIntentPlan(req, res)
+      } else if (req.method === 'GET' && pathname === '/intent/outcomes') {
+        await this.handleIntentOutcomes(req, res, url)
       } else {
         res.writeHead(404, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Not found' }))
@@ -1001,6 +1054,282 @@ export class ControlPlaneServer {
       tenantId: payload.tenantId,
       rule: payload.rule
     }))
+  }
+
+  /**
+   * POST /intent/goals - Define operational goals
+   * 
+   * Body:
+   * {
+   *   "goal": "obtain_signed_contract",
+   *   "description": "Achieve signed contract state",
+   *   "successCriteria": ["document.state == signed"],
+   *   "priority": "high",
+   *   "operationalStrategies": ["docusign_fast_path", "manual_review_flow"]
+   * }
+   */
+  private async handleIntentGoals(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    try {
+      const body = await this.readBody(req)
+      const data = JSON.parse(body)
+
+      if (!data.tenantId || !data.goal) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Missing required fields: tenantId, goal' }))
+        return
+      }
+
+      const goalDefinition = {
+        id: `goal-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        tenantId: data.tenantId,
+        goal: data.goal,
+        description: data.description || '',
+        successCriteria: data.successCriteria || [],
+        priority: data.priority || 'medium',
+        operationalStrategies: data.operationalStrategies || [],
+        timeoutMs: data.timeoutMs,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+
+      // Store goal
+      await this.intentStore.storeGoal(goalDefinition)
+
+      // Register in graph
+      this.intentGraph.registerGoal(goalDefinition)
+
+      res.writeHead(201, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        success: true,
+        goal: goalDefinition
+      }))
+    } catch (error) {
+      console.error('Error creating goal:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to create goal'
+      }))
+    }
+  }
+
+  /**
+   * GET /intent/strategies - Get learned strategies for goals
+   * 
+   * Query params:
+   * - tenantId: required
+   * - goalId: optional
+   */
+  private async handleIntentStrategies(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+    const goalId = url.searchParams.get('goalId')
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Missing tenantId' }))
+      return
+    }
+
+    try {
+      if (goalId) {
+        // Get strategies for specific goal
+        const strategies = this.intentGraph.getStrategiesForGoal(goalId)
+        
+        // Evaluate effectiveness for each strategy
+        const strategyMetrics = await Promise.all(
+          strategies.map(async (strategy) => {
+            const metrics = await this.goalOutcomeEvaluator.evaluateStrategyEffectiveness(
+              tenantId,
+              goalId,
+              strategy.strategyName
+            )
+            return {
+              strategy,
+              metrics
+            }
+          })
+        )
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          goalId,
+          strategies: strategyMetrics
+        }))
+      } else {
+        // Get all strategies for tenant
+        const goals = this.intentGraph.getGoalsForTenant(tenantId)
+        const allStrategies = []
+
+        for (const goal of goals) {
+          const strategies = this.intentGraph.getStrategiesForGoal(goal.id)
+          allStrategies.push({
+            goalId: goal.id,
+            goalName: goal.goal,
+            strategies
+          })
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          tenantId,
+          goals: allStrategies
+        }))
+      }
+    } catch (error) {
+      console.error('Error getting strategies:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to get strategies'
+      }))
+    }
+  }
+
+  /**
+   * POST /intent/plan - Generate adaptive execution plans
+   * 
+   * Body:
+   * {
+   *   "tenantId": "t1",
+   *   "goalId": "goal-123",
+   *   "strategyName": "docusign_fast_path"
+   * }
+   * 
+   * Returns:
+   * {
+   *   "goal": "obtain_signed_contract",
+   *   "selectedStrategy": "docusign_fast_path",
+   *   "confidence": 0.91,
+   *   "fallbackStrategies": ["manual_review_recovery"],
+   *   "predictedSuccessProbability": 0.94
+   * }
+   */
+  private async handleIntentPlan(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    try {
+      const body = await this.readBody(req)
+      const data = JSON.parse(body)
+
+      if (!data.tenantId || !data.goalId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Missing required fields: tenantId, goalId' }))
+        return
+      }
+
+      // Get tenant model
+      const model = this.registry.getModel(data.tenantId)
+      if (!model) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: `Model not found for tenant ${data.tenantId}` }))
+        return
+      }
+
+      let plan
+
+      if (data.strategyName) {
+        // Generate plan for specific strategy
+        plan = await this.planSynthesizer.synthesizePlan(
+          data.tenantId,
+          data.goalId,
+          data.strategyName,
+          model
+        )
+      } else {
+        // Select best strategy and generate plan
+        const strategySelection = await this.goalPlanner.selectStrategy(
+          data.tenantId,
+          data.goalId
+        )
+        
+        plan = await this.planSynthesizer.synthesizePlan(
+          data.tenantId,
+          data.goalId,
+          strategySelection.selectedStrategy,
+          model
+        )
+
+        // Enhance response with strategy selection reasoning
+        const response = {
+          ...plan,
+          strategySelection: {
+            selectedStrategy: strategySelection.selectedStrategy,
+            confidence: strategySelection.confidence,
+            rationale: strategySelection.rationale,
+            fallbackStrategies: strategySelection.fallbackStrategies
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(response))
+        return
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(plan))
+    } catch (error) {
+      console.error('Error generating plan:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to generate plan'
+      }))
+    }
+  }
+
+  /**
+   * GET /intent/outcomes - Get goal completion rates
+   * 
+   * Query params:
+   * - tenantId: required
+   * - goalId: optional
+   */
+  private async handleIntentOutcomes(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+    const goalId = url.searchParams.get('goalId')
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Missing tenantId' }))
+      return
+    }
+
+    try {
+      if (goalId) {
+        // Get outcomes for specific goal
+        const completionRate = await this.goalOutcomeEvaluator.evaluateGoalCompletionRate(
+          tenantId,
+          goalId
+        )
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(completionRate))
+      } else {
+        // Get outcomes for all goals
+        const completionRates = await this.goalOutcomeEvaluator.getAllGoalCompletionRates(tenantId)
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          tenantId,
+          goals: completionRates
+        }))
+      }
+    } catch (error) {
+      console.error('Error getting outcomes:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to get outcomes'
+      }))
+    }
   }
 
   /**
