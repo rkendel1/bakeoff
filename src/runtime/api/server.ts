@@ -28,6 +28,14 @@ import { StrategyGraph } from '../intent/StrategyGraph.js'
 import { GoalOutcomeEvaluator } from '../intent/GoalOutcomeEvaluator.js'
 import { IntentAwareGovernanceEngine } from '../intent/IntentAwareGovernanceEngine.js'
 import { OperationalPlanSynthesizer } from '../intent/OperationalPlanSynthesizer.js'
+import { RuntimeMemoryStore } from '../memory/RuntimeMemoryStore.js'
+import { RuntimeForecastStore } from '../predictive/RuntimeForecastStore.js'
+import { StrategyDecayDetector } from '../predictive/StrategyDecayDetector.js'
+import { FailureTrajectoryAnalyzer } from '../predictive/FailureTrajectoryAnalyzer.js'
+import { GoalCompletionForecaster } from '../predictive/GoalCompletionForecaster.js'
+import { EntropyTrajectoryForecaster } from '../predictive/EntropyTrajectoryForecaster.js'
+import { PredictiveRiskEngine } from '../predictive/PredictiveRiskEngine.js'
+import { PredictiveGovernanceEngine } from '../predictive/PredictiveGovernanceEngine.js'
 
 /**
  * ControlPlaneServer - HTTP API server for the runtime control plane
@@ -69,6 +77,16 @@ export class ControlPlaneServer {
   private goalOutcomeEvaluator: GoalOutcomeEvaluator
   private intentAwareGovernance: IntentAwareGovernanceEngine
   private planSynthesizer: OperationalPlanSynthesizer
+  
+  // Predictive Layer
+  private memoryStore: RuntimeMemoryStore
+  private forecastStore: RuntimeForecastStore
+  private decayDetector: StrategyDecayDetector
+  private trajectoryAnalyzer: FailureTrajectoryAnalyzer
+  private completionForecaster: GoalCompletionForecaster
+  private entropyForecaster: EntropyTrajectoryForecaster
+  private predictiveRiskEngine: PredictiveRiskEngine
+  private predictiveGovernance: PredictiveGovernanceEngine
 
   constructor(
     private readonly registry: TenantRuntimeRegistry,
@@ -114,6 +132,31 @@ export class ControlPlaneServer {
       this.intentGraph,
       this.strategyGraph,
       this.goalOutcomeEvaluator
+    )
+    
+    // Initialize Predictive Layer
+    this.memoryStore = new RuntimeMemoryStore()
+    this.forecastStore = new RuntimeForecastStore()
+    this.decayDetector = new StrategyDecayDetector(this.strategyOutcomeStore)
+    this.trajectoryAnalyzer = new FailureTrajectoryAnalyzer(
+      this.memoryStore,
+      this.topologyStore
+    )
+    this.completionForecaster = new GoalCompletionForecaster(
+      this.goalPlanner,
+      this.strategyOutcomeStore,
+      this.decayDetector
+    )
+    this.entropyForecaster = new EntropyTrajectoryForecaster(this.topologyStore)
+    this.predictiveRiskEngine = new PredictiveRiskEngine(
+      this.decayDetector,
+      this.trajectoryAnalyzer,
+      this.completionForecaster,
+      this.entropyForecaster
+    )
+    this.predictiveGovernance = new PredictiveGovernanceEngine(
+      this.predictiveRiskEngine,
+      this.policyEngine
     )
   }
 
@@ -202,6 +245,16 @@ export class ControlPlaneServer {
         await this.handleIntentPlan(req, res)
       } else if (req.method === 'GET' && pathname === '/intent/outcomes') {
         await this.handleIntentOutcomes(req, res, url)
+      } else if (req.method === 'GET' && pathname === '/predictive/risks') {
+        await this.handlePredictiveRisks(req, res, url)
+      } else if (req.method === 'GET' && pathname === '/predictive/goal-forecast') {
+        await this.handlePredictiveGoalForecast(req, res, url)
+      } else if (req.method === 'GET' && pathname === '/predictive/strategy-decay') {
+        await this.handlePredictiveStrategyDecay(req, res, url)
+      } else if (req.method === 'GET' && pathname === '/predictive/entropy-forecast') {
+        await this.handlePredictiveEntropyForecast(req, res, url)
+      } else if (req.method === 'POST' && pathname === '/predictive/recalculate') {
+        await this.handlePredictiveRecalculate(req, res)
       } else {
         res.writeHead(404, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Not found' }))
@@ -1328,6 +1381,255 @@ export class ControlPlaneServer {
       res.writeHead(500, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({
         error: error instanceof Error ? error.message : 'Failed to get outcomes'
+      }))
+    }
+  }
+
+  /**
+   * GET /predictive/risks - Get predicted operational risks
+   * 
+   * Query params:
+   * - tenantId: required
+   * - forecastWindow: optional (default: "24h")
+   * 
+   * Returns:
+   * {
+   *   "overallRiskScore": 0.71,
+   *   "risks": [
+   *     {
+   *       "type": "provider_instability",
+   *       "severity": "high",
+   *       "probability": 0.84,
+   *       "forecastWindow": "24h",
+   *       ...
+   *     }
+   *   ],
+   *   "preemptiveActions": [...]
+   * }
+   */
+  private async handlePredictiveRisks(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+    const forecastWindow = url.searchParams.get('forecastWindow') || '24h'
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Missing required parameter: tenantId' }))
+      return
+    }
+
+    try {
+      const riskAssessment = await this.predictiveRiskEngine.assessRisks(
+        tenantId,
+        forecastWindow
+      )
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(riskAssessment))
+    } catch (error) {
+      console.error('Error assessing risks:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to assess risks'
+      }))
+    }
+  }
+
+  /**
+   * GET /predictive/goal-forecast - Forecast goal completion
+   * 
+   * Query params:
+   * - tenantId: required
+   * - goalId: required
+   * 
+   * Returns:
+   * {
+   *   "goal": "obtain_signed_contract",
+   *   "predictedSuccessProbability": 0.82,
+   *   "riskFactors": [...],
+   *   "recommendedPreemptiveActions": [...]
+   * }
+   */
+  private async handlePredictiveGoalForecast(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+    const goalId = url.searchParams.get('goalId')
+
+    if (!tenantId || !goalId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Missing required parameters: tenantId, goalId' }))
+      return
+    }
+
+    try {
+      const forecast = await this.completionForecaster.forecastCompletion(
+        tenantId,
+        goalId
+      )
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(forecast))
+    } catch (error) {
+      console.error('Error forecasting goal completion:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to forecast goal completion'
+      }))
+    }
+  }
+
+  /**
+   * GET /predictive/strategy-decay - Detect strategy effectiveness degradation
+   * 
+   * Query params:
+   * - tenantId: required
+   * - goalId: optional (if not provided, returns all decaying strategies)
+   * - strategyName: optional (if provided, returns decay for specific strategy)
+   * 
+   * Returns array of StrategyDecay objects
+   */
+  private async handlePredictiveStrategyDecay(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+    const goalId = url.searchParams.get('goalId')
+    const strategyName = url.searchParams.get('strategyName')
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Missing required parameter: tenantId' }))
+      return
+    }
+
+    try {
+      let decays
+
+      if (goalId && strategyName) {
+        // Specific strategy
+        const decay = await this.decayDetector.detectDecay(tenantId, goalId, strategyName)
+        decays = decay ? [decay] : []
+      } else if (goalId) {
+        // All strategies for a goal
+        decays = await this.decayDetector.detectDecayForGoal(tenantId, goalId)
+      } else {
+        // All strategies for tenant
+        decays = await this.decayDetector.detectDecayForTenant(tenantId)
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(decays))
+    } catch (error) {
+      console.error('Error detecting strategy decay:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to detect strategy decay'
+      }))
+    }
+  }
+
+  /**
+   * GET /predictive/entropy-forecast - Forecast operational fragmentation
+   * 
+   * Query params:
+   * - tenantId: required
+   * 
+   * Returns:
+   * {
+   *   "currentEntropy": 0.45,
+   *   "predictedEntropy24h": 0.48,
+   *   "predictedEntropy7d": 0.55,
+   *   "entropyTrajectory": "diverging",
+   *   "fragmentationRisks": [...]
+   * }
+   */
+  private async handlePredictiveEntropyForecast(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Missing required parameter: tenantId' }))
+      return
+    }
+
+    try {
+      const forecast = await this.entropyForecaster.forecastEntropy(tenantId)
+
+      if (!forecast) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ 
+          error: 'Not enough data to forecast entropy. Need at least 5 topology snapshots.' 
+        }))
+        return
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(forecast))
+    } catch (error) {
+      console.error('Error forecasting entropy:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to forecast entropy'
+      }))
+    }
+  }
+
+  /**
+   * POST /predictive/recalculate - Rebuild predictive models
+   * 
+   * Body:
+   * {
+   *   "tenantId": "t1"
+   * }
+   * 
+   * Forces recalculation of all forecasts and predictive models.
+   * Returns new risk assessment.
+   */
+  private async handlePredictiveRecalculate(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    try {
+      const body = await this.readBody(req)
+      const data = JSON.parse(body)
+
+      if (!data.tenantId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Missing required field: tenantId' }))
+        return
+      }
+
+      // Recalculate all forecasts
+      const riskAssessment = await this.predictiveRiskEngine.assessRisks(data.tenantId)
+      const entropyForecast = await this.entropyForecaster.forecastEntropy(data.tenantId)
+      const decays = await this.decayDetector.detectDecayForTenant(data.tenantId)
+
+      const response = {
+        recalculatedAt: new Date(),
+        riskAssessment,
+        entropyForecast,
+        strategyDecays: decays,
+        message: 'Predictive models recalculated successfully'
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(response))
+    } catch (error) {
+      console.error('Error recalculating forecasts:', error)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Failed to recalculate forecasts'
       }))
     }
   }
