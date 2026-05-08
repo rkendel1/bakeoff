@@ -9,6 +9,8 @@ export type ExecutionRecord = {
   entityId: string
   event: RuntimeEvent
 
+  modelVersion: string   // 👈 NEW CRITICAL FIELD - binds execution to specific model version
+
   status: ExecutionStatus
 
   contextSnapshot: ExecutionContext

@@ -157,11 +157,26 @@ export class ControlPlaneServer {
       return
     }
 
-    // Enqueue event for asynchronous processing by worker
-    this.executionQueue.enqueue(event)
+    // CRITICAL: Resolve model version at ingestion time
+    let modelVersion: string
+    try {
+      modelVersion = this.registry.resolveVersion(
+        event.tenantId,
+        event.headers?.modelVersion // optional override
+      )
+    } catch (error) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Model version resolution failed' 
+      }))
+      return
+    }
+
+    // Enqueue event with resolved model version for asynchronous processing by worker
+    this.executionQueue.enqueue(event, modelVersion)
 
     res.writeHead(202, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ status: 'accepted', event }))
+    res.end(JSON.stringify({ status: 'accepted', event, modelVersion }))
   }
 
   /**

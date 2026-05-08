@@ -107,8 +107,8 @@ export class RuntimeWorker {
             continue
           }
 
-          // Execute the event through the runtime engine
-          await engine.ingest(job.event)
+          // Execute the event through the runtime engine with model version
+          await engine.ingest(job.event, job.modelVersion)
 
           // Acknowledge successful execution
           this.queue.ack(job.id)

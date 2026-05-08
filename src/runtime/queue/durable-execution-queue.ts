@@ -20,6 +20,7 @@ export type QueueStatus = 'queued' | 'processing' | 'completed' | 'failed' | 're
 export type QueuedEvent = {
   id: string
   event: RuntimeEvent
+  modelVersion: string  // 👈 NEW FIELD - binds queued event to specific model version
   status: QueueStatus
   attempts: number
   lastError?: string
@@ -54,14 +55,15 @@ export class DurableExecutionQueue {
   private readonly dlq: DeadLetterQueue = new DeadLetterQueue()
 
   /**
-   * Enqueue an event for processing
+   * Enqueue an event for processing with a specific model version
    * Event starts in "queued" state
    */
-  enqueue(event: RuntimeEvent): string {
+  enqueue(event: RuntimeEvent, modelVersion: string): string {
     const id = randomUUID()
     const queuedEvent: QueuedEvent = {
       id,
       event,
+      modelVersion,
       status: 'queued',
       attempts: 0,
       createdAt: new Date(),

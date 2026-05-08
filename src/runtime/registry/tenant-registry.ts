@@ -1,8 +1,9 @@
 import type { TenantModel } from '../../models/tenant-model.js'
+import type { TenantModelVersion } from '../models/model-version.js'
 
 /**
  * ModelVersion - Represents a versioned tenant model
- * This is a stub for future model versioning support.
+ * @deprecated Use TenantModelVersion instead
  */
 export type ModelVersion = {
   version: string
@@ -60,10 +61,34 @@ export class TenantRuntimeRegistry {
   }
 
   /**
-   * Get a tenant model by tenant ID
+   * Get a tenant model by tenant ID (returns latest version)
    */
   getModel(tenantId: string): TenantModel | undefined {
     return this.models.get(tenantId)
+  }
+
+  /**
+   * Get the latest model version for a tenant
+   */
+  getLatestModel(tenantId: string): TenantModel | undefined {
+    return this.getModelVersion(tenantId, 'latest')
+  }
+
+  /**
+   * Resolve model version for execution
+   * - If version is provided, use it
+   * - Otherwise, use 'latest'
+   */
+  resolveVersion(tenantId: string, requestedVersion?: string): string {
+    const version = requestedVersion || 'latest'
+    
+    // Validate that the version exists
+    const model = this.getModelVersion(tenantId, version)
+    if (!model) {
+      throw new Error(`Model version not found: ${tenantId}@${version}`)
+    }
+    
+    return version
   }
 
   /**
