@@ -12,7 +12,7 @@ import { Executor } from '../runtime/executor.js'
 import { Dispatcher } from '../runtime/dispatcher.js'
 import { DocuSealAdapter } from '../adapters/docuseal-adapter.js'
 import { demoTenant } from '../tenants/demo-tenant.js'
-import { ExecutionQueue } from '../runtime/queue/execution-queue.js'
+import { DurableExecutionQueue } from '../runtime/queue/durable-execution-queue.js'
 import { RuntimeWorker } from '../runtime/worker/runtime-worker.js'
 
 /**
@@ -126,7 +126,7 @@ test('ControlPlaneServer: POST /events ingests event', async () => {
   const inspector = new RuntimeInspector()
   
   // Create execution queue and worker
-  const executionQueue = new ExecutionQueue()
+  const executionQueue = new DurableExecutionQueue()
   const worker = new RuntimeWorker(executionQueue, engines)
   
   const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
@@ -199,7 +199,7 @@ test('ControlPlaneServer: GET /executions queries executions', async () => {
   const inspector = new RuntimeInspector()
   
   // Create execution queue (not needed for this test, but required by server)
-  const executionQueue = new ExecutionQueue()
+  const executionQueue = new DurableExecutionQueue()
   
   const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
   await server.start(3002)
@@ -256,7 +256,7 @@ test('ControlPlaneServer: GET /executions/:id inspects execution', async () => {
   const inspector = new RuntimeInspector()
   
   // Create execution queue (not needed for this test, but required by server)
-  const executionQueue = new ExecutionQueue()
+  const executionQueue = new DurableExecutionQueue()
   
   const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
   await server.start(3003)
@@ -286,7 +286,7 @@ test('ControlPlaneServer: POST /simulate simulates execution', async () => {
   const inspector = new RuntimeInspector()
   
   // Create execution queue (not needed for this test, but required by server)
-  const executionQueue = new ExecutionQueue()
+  const executionQueue = new DurableExecutionQueue()
   
   const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue)
   await server.start(3004)
