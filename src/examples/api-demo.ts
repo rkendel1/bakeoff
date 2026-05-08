@@ -96,7 +96,10 @@ const ingestResult = await ingestResponse.json()
 console.log(`   ✓ Status: ${ingestResponse.status}`)
 console.log(`   ✓ Result: ${ingestResult.status}\n`)
 
-// Wait for processing
+// Wait for async processing to complete
+// The worker polls every 100ms, so we wait 200ms to ensure:
+// - Initial event is processed
+// - Follow-up events (signature.completed) are also processed
 await new Promise((resolve) => setTimeout(resolve, 200))
 
 // 6. Demo: Query Executions via API

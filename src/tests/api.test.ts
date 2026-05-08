@@ -15,6 +15,27 @@ import { demoTenant } from '../tenants/demo-tenant.js'
 import { ExecutionQueue } from '../runtime/queue/execution-queue.js'
 import { RuntimeWorker } from '../runtime/worker/runtime-worker.js'
 
+/**
+ * Helper function to wait for the worker queue to be empty
+ * Polls the worker status until queue is empty or timeout is reached
+ */
+async function waitForQueueEmpty(
+  worker: RuntimeWorker,
+  timeoutMs: number = 1000
+): Promise<void> {
+  const startTime = Date.now()
+  
+  while (Date.now() - startTime < timeoutMs) {
+    const status = worker.getStatus()
+    if (status.queueSize === 0 && !status.processing) {
+      return
+    }
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  
+  throw new Error('Timeout waiting for queue to be empty')
+}
+
 // --- TenantRuntimeRegistry Tests ---
 
 test('TenantRuntimeRegistry: register and retrieve tenant model', () => {
@@ -132,8 +153,9 @@ test('ControlPlaneServer: POST /events ingests event', async () => {
     const result = await response.json()
     assert.equal(result.status, 'accepted')
     
-    // Wait a bit for async processing
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    // Wait for async processing to complete
+    // Poll worker status until queue is empty and processing is done
+    await waitForQueueEmpty(worker)
     
     // Verify execution was recorded
     const executions = await executionStore.all()

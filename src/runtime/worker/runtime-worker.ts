@@ -22,6 +22,7 @@ import type { ExecutionQueue } from '../queue/execution-queue.js'
 export class RuntimeWorker {
   private running = false
   private pollingInterval: NodeJS.Timeout | null = null
+  private processing = false // Prevent concurrent batch processing
 
   constructor(
     private readonly queue: ExecutionQueue,
@@ -67,44 +68,57 @@ export class RuntimeWorker {
 
   /**
    * Process a batch of events from the queue
+   * Prevents concurrent execution to avoid overlapping batches
    */
   private async processBatch(): Promise<void> {
-    while (this.queue.hasPending() && this.running) {
-      const event = this.queue.dequeue()
-      
-      if (!event) {
-        break
-      }
+    // Skip if already processing to prevent concurrent execution
+    if (this.processing) {
+      return
+    }
 
-      try {
-        // Get the engine for this tenant
-        const engine = this.engines.get(event.tenantId)
+    this.processing = true
+    
+    try {
+      while (this.queue.hasPending() && this.running) {
+        const event = this.queue.dequeue()
         
-        if (!engine) {
-          console.error('[worker] No engine found for tenant', { tenantId: event.tenantId })
-          continue
+        if (!event) {
+          break
         }
 
-        // Execute the event through the runtime engine
-        await engine.ingest(event)
-      } catch (error) {
-        console.error('[worker] Event execution failed', {
-          event,
-          error: error instanceof Error ? error.message : String(error)
-        })
-        // Event execution failures are already tracked in ExecutionStore
-        // Worker continues processing other events
+        try {
+          // Get the engine for this tenant
+          const engine = this.engines.get(event.tenantId)
+          
+          if (!engine) {
+            console.error('[worker] No engine found for tenant', { tenantId: event.tenantId })
+            continue
+          }
+
+          // Execute the event through the runtime engine
+          await engine.ingest(event)
+        } catch (error) {
+          console.error('[worker] Event execution failed', {
+            event,
+            error: error instanceof Error ? error.message : String(error)
+          })
+          // Event execution failures are already tracked in ExecutionStore
+          // Worker continues processing other events
+        }
       }
+    } finally {
+      this.processing = false
     }
   }
 
   /**
    * Get worker status
    */
-  getStatus(): { running: boolean; queueSize: number } {
+  getStatus(): { running: boolean; queueSize: number; processing: boolean } {
     return {
       running: this.running,
-      queueSize: this.queue.size()
+      queueSize: this.queue.size(),
+      processing: this.processing
     }
   }
 }
