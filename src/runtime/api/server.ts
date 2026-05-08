@@ -11,6 +11,9 @@ import { BehavioralDiffEngine } from '../diff/behavioral-diff-engine.js'
 import { CompatibilityAnalyzer } from '../migration/compatibility.js'
 import { MigrationSimulator } from '../migration/migration-simulator.js'
 import type { ExecutionStore } from '../store/execution-store.js'
+import { CanonicalInferenceEngine } from '../intelligence/CanonicalInferenceEngine.js'
+import { DriftFromCanonicalAnalyzer } from '../intelligence/DriftFromCanonicalAnalyzer.js'
+import { OperationalTopologyStore } from '../store/OperationalTopologyStore.js'
 
 /**
  * ControlPlaneServer - HTTP API server for the runtime control plane
@@ -33,6 +36,9 @@ export class ControlPlaneServer {
   private diffEngine: BehavioralDiffEngine
   private compatibilityAnalyzer: CompatibilityAnalyzer
   private migrationSimulator: MigrationSimulator
+  private inferenceEngine: CanonicalInferenceEngine
+  private driftAnalyzer: DriftFromCanonicalAnalyzer
+  private topologyStore: OperationalTopologyStore
 
   constructor(
     private readonly registry: TenantRuntimeRegistry,
@@ -46,6 +52,9 @@ export class ControlPlaneServer {
     this.diffEngine = new BehavioralDiffEngine()
     this.compatibilityAnalyzer = new CompatibilityAnalyzer()
     this.migrationSimulator = new MigrationSimulator()
+    this.inferenceEngine = new CanonicalInferenceEngine()
+    this.driftAnalyzer = new DriftFromCanonicalAnalyzer()
+    this.topologyStore = new OperationalTopologyStore()
   }
 
   /**
@@ -107,6 +116,12 @@ export class ControlPlaneServer {
         await this.handleModelDiff(req, res, url)
       } else if (req.method === 'POST' && pathname === '/models/simulate-migration') {
         await this.handleSimulateMigration(req, res)
+      } else if (req.method === 'GET' && pathname === '/intelligence/canonical') {
+        await this.handleIntelligenceCanonical(req, res, url)
+      } else if (req.method === 'GET' && pathname === '/intelligence/drift') {
+        await this.handleIntelligenceDrift(req, res, url)
+      } else if (req.method === 'GET' && pathname === '/intelligence/topology') {
+        await this.handleIntelligenceTopology(req, res, url)
       } else {
         res.writeHead(404, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Not found' }))
@@ -497,6 +512,159 @@ export class ControlPlaneServer {
         unchanged,
         changeRate: Math.round(changeRate * 100) / 100
       }
+    }))
+  }
+
+  /**
+   * GET /intelligence/canonical?tenantId=<id>
+   * 
+   * Returns inferred canonical model based on execution history
+   * 
+   * Example response:
+   * {
+   *   "tenantId": "demo",
+   *   "canonicalStates": [
+   *     { "state": "pending_signature", "centrality": 0.92, "executionCount": 45 }
+   *   ],
+   *   "canonicalTransitions": [
+   *     { "from": "draft", "to": "pending_signature", "confidence": 0.94, ... }
+   *   ],
+   *   "dominantProviders": [
+   *     { "action": "send_for_signature", "provider": "docuseal", "usage": 0.91, ... }
+   *   ]
+   * }
+   */
+  private async handleIntelligenceCanonical(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'tenantId parameter required' }))
+      return
+    }
+
+    // Get execution history for the tenant
+    const executions = await this.executionStore.listByTenant(tenantId)
+
+    if (executions.length === 0) {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        tenantId,
+        message: 'No execution history available for canonical inference'
+      }))
+      return
+    }
+
+    // Generate topology snapshot
+    const snapshot = this.inferenceEngine.generateTopologySnapshot(tenantId, executions)
+
+    // Store snapshot for future analysis
+    await this.topologyStore.store(snapshot)
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(snapshot))
+  }
+
+  /**
+   * GET /intelligence/drift?tenantId=<id>
+   * 
+   * Returns operational drift analysis comparing declared model vs observed behavior
+   * 
+   * Example response:
+   * {
+   *   "driftDetected": true,
+   *   "unusedTransitions": ["draft -> pending_review"],
+   *   "shadowTransitions": ["draft -> pending_signature"],
+   *   "entropyScore": 0.67,
+   *   "recommendations": [...]
+   * }
+   */
+  private async handleIntelligenceDrift(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'tenantId parameter required' }))
+      return
+    }
+
+    // Get tenant model
+    const model = this.registry.getLatestModel(tenantId)
+    if (!model) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: `Model not found for tenant: ${tenantId}` }))
+      return
+    }
+
+    // Get execution history for the tenant
+    const executions = await this.executionStore.listByTenant(tenantId)
+
+    if (executions.length === 0) {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        tenantId,
+        driftDetected: false,
+        message: 'No execution history available for drift analysis'
+      }))
+      return
+    }
+
+    // Analyze drift
+    const driftAnalysis = this.driftAnalyzer.analyzeDrift(tenantId, model, executions)
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(driftAnalysis))
+  }
+
+  /**
+   * GET /intelligence/topology?tenantId=<id>
+   * 
+   * Returns weighted operational graph (topology history)
+   * 
+   * Example response:
+   * {
+   *   "tenantId": "demo",
+   *   "currentTopology": { ... },
+   *   "evolutionMetrics": { ... },
+   *   "snapshotHistory": [...]
+   * }
+   */
+  private async handleIntelligenceTopology(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'tenantId parameter required' }))
+      return
+    }
+
+    // Get latest topology snapshot
+    const latestTopology = await this.topologyStore.getLatest(tenantId)
+
+    // Get evolution metrics
+    const evolutionMetrics = await this.topologyStore.getEvolutionMetrics(tenantId)
+
+    // Get snapshot history
+    const snapshotHistory = await this.topologyStore.getHistory(tenantId)
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      tenantId,
+      currentTopology: latestTopology,
+      evolutionMetrics,
+      snapshotHistory
     }))
   }
 
