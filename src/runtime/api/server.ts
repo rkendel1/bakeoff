@@ -151,9 +151,7 @@ export class ControlPlaneServer {
     runtimeApiKey?: string
   ) {
     this.server = http.createServer(this.handleRequest.bind(this))
-    const configuredRuntimeApiKey = runtimeApiKey ?? process.env.RUNTIME_API_KEY
-    const normalizedRuntimeApiKey = configuredRuntimeApiKey?.trim()
-    this.runtimeApiKey = normalizedRuntimeApiKey ? normalizedRuntimeApiKey : null
+    this.runtimeApiKey = (runtimeApiKey ?? process.env.RUNTIME_API_KEY)?.trim() || null
     this.diffEngine = new BehavioralDiffEngine()
     this.compatibilityAnalyzer = new CompatibilityAnalyzer()
     this.migrationSimulator = new MigrationSimulator()
