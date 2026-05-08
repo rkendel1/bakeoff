@@ -50,8 +50,7 @@ export class ForecastCalibrationEngine {
    * This is the main entry point for recalibration.
    */
   async performFullCalibration(tenantId: string): Promise<CalibrationReport> {
-    const startMessage = `Starting full calibration for tenant: ${tenantId}`
-    console.log(startMessage)
+    console.log('Starting full calibration', { tenantId })
 
     // Step 1: Analyze accuracy for all models
     const accuracyMetrics = await this.accuracyAnalyzer.analyzeAllModels(tenantId)
@@ -76,8 +75,8 @@ export class ForecastCalibrationEngine {
       adjustments
     )
 
-    const completeMessage = `Calibration complete for tenant: ${tenantId}`
-    console.log(completeMessage, {
+    console.log('Calibration complete', {
+      tenantId,
       systemAccuracy: report.systemAccuracy,
       adjustmentsApplied: adjustments.length,
       modelsNeedingAttention: report.modelStatus.filter((m) => m.needsCalibration).length

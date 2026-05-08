@@ -228,6 +228,10 @@ export class PredictionAccuracyAnalyzer {
    * Score = (1/N) * Σ(predicted_probability - actual_outcome)^2
    */
   private calculateBrierScore(outcomes: ForecastOutcome[]): number {
+    if (outcomes.length === 0) {
+      return 0
+    }
+
     const totalError = outcomes.reduce(
       (sum, o) => sum + o.errorMetrics.probabilityError,
       0
