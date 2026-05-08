@@ -16,6 +16,9 @@ import { DriftFromCanonicalAnalyzer } from '../intelligence/DriftFromCanonicalAn
 import { OperationalTopologyStore } from '../store/OperationalTopologyStore.js'
 import { RecommendationEngine } from '../intelligence/recommendation/RecommendationEngine.js'
 import { RecommendationStore } from '../intelligence/recommendation/RecommendationStore.js'
+import { RuntimePolicyEngine } from '../policy/RuntimePolicyEngine.js'
+import { PolicyStore } from '../policy/PolicyStore.js'
+import { GovernanceDecisionStore } from '../policy/GovernanceDecisionStore.js'
 
 /**
  * ControlPlaneServer - HTTP API server for the runtime control plane
@@ -43,6 +46,9 @@ export class ControlPlaneServer {
   private topologyStore: OperationalTopologyStore
   private recommendationEngine: RecommendationEngine
   private recommendationStore: RecommendationStore
+  private policyEngine: RuntimePolicyEngine
+  private policyStore: PolicyStore
+  private governanceStore: GovernanceDecisionStore
 
   constructor(
     private readonly registry: TenantRuntimeRegistry,
@@ -61,6 +67,9 @@ export class ControlPlaneServer {
     this.topologyStore = new OperationalTopologyStore()
     this.recommendationEngine = new RecommendationEngine(this.topologyStore)
     this.recommendationStore = new RecommendationStore()
+    this.policyStore = new PolicyStore()
+    this.policyEngine = new RuntimePolicyEngine(this.policyStore)
+    this.governanceStore = new GovernanceDecisionStore()
   }
 
   /**
@@ -134,6 +143,12 @@ export class ControlPlaneServer {
         await this.handleIntelligenceConvergence(req, res, url)
       } else if (req.method === 'POST' && pathname === '/intelligence/model-patch') {
         await this.handleIntelligenceModelPatch(req, res)
+      } else if (req.method === 'POST' && pathname === '/policy/evaluate') {
+        await this.handlePolicyEvaluate(req, res)
+      } else if (req.method === 'GET' && pathname === '/policy/governance-history') {
+        await this.handlePolicyGovernanceHistory(req, res, url)
+      } else if (req.method === 'POST' && pathname === '/policy/rules') {
+        await this.handlePolicyRules(req, res)
       } else {
         res.writeHead(404, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Not found' }))
@@ -821,6 +836,171 @@ export class ControlPlaneServer {
 
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify(patchSet))
+  }
+
+  /**
+   * POST /policy/evaluate
+   * 
+   * Dry-run policy evaluation
+   * 
+   * Body:
+   * {
+   *   "tenantId": "tenant-1",
+   *   "entityId": "doc-1",
+   *   "executionPlan": { ... },
+   *   "context": { ... }
+   * }
+   */
+  private async handlePolicyEvaluate(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    const body = await this.readBody(req)
+    const payload = JSON.parse(body)
+
+    if (!payload.tenantId || !payload.executionPlan) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'tenantId and executionPlan are required' }))
+      return
+    }
+
+    // Get tenant model
+    const model = this.registry.getModel(payload.tenantId)
+    if (!model) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: `Tenant ${payload.tenantId} not found` }))
+      return
+    }
+
+    // Get execution history for intelligence metrics
+    const executions = await this.executionStore.listByTenant(payload.tenantId)
+    
+    // Calculate provider stability
+    const providerReliabilities = new (await import('../intelligence/recommendation/ProviderReliabilityAnalyzer.js')).ProviderReliabilityAnalyzer()
+      .analyzeProviders(executions, this.executionQueue)
+    const providerStability = new Map<string, number>()
+    for (const reliability of providerReliabilities) {
+      providerStability.set(reliability.provider, reliability.stabilityScore)
+    }
+
+    // Calculate canonical metrics
+    const snapshot = this.inferenceEngine.generateTopologySnapshot(payload.tenantId, executions)
+
+    // Build policy evaluation context
+    const policyContext = {
+      tenantId: payload.tenantId,
+      entityId: payload.entityId || 'eval',
+      executionContext: payload.context || {},
+      model,
+      executionPlan: payload.executionPlan,
+      providerStability,
+      entropy: snapshot.entropyScore,
+      convergenceScore: executions.filter((e) => e.status === 'completed').length / Math.max(1, executions.length),
+      canonicalConfidence: snapshot.canonicalConfidence
+    }
+
+    // Evaluate policies
+    const decision = await this.policyEngine.dryRun(policyContext as any)
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      allowed: decision.allowed,
+      warnings: decision.warnings || [],
+      enforcementActions: decision.enforcementActions || [],
+      modifiedExecutionPlan: decision.modifiedExecutionPlan,
+      rationale: decision.rationale,
+      metrics: {
+        providerStability: Object.fromEntries(providerStability),
+        entropy: snapshot.entropyScore,
+        canonicalConfidence: snapshot.canonicalConfidence
+      }
+    }))
+  }
+
+  /**
+   * GET /policy/governance-history?tenantId=<id>&limit=<n>
+   * 
+   * Returns governance decision history
+   */
+  private async handlePolicyGovernanceHistory(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+    const limitParam = url.searchParams.get('limit')
+    const limit = limitParam ? parseInt(limitParam, 10) : 50
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'tenantId parameter required' }))
+      return
+    }
+
+    // Get governance history
+    const recentDecisions = await this.governanceStore.getRecent(tenantId, limit)
+    const blockedExecutions = await this.governanceStore.getBlockedExecutions(tenantId)
+    const withEnforcement = await this.governanceStore.getWithEnforcement(tenantId)
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      tenantId,
+      recentDecisions,
+      summary: {
+        totalDecisions: recentDecisions.length,
+        blockedExecutions: blockedExecutions.length,
+        enforcementActions: withEnforcement.length
+      }
+    }))
+  }
+
+  /**
+   * POST /policy/rules
+   * 
+   * Create tenant governance policy
+   * 
+   * Body:
+   * {
+   *   "tenantId": "tenant-1",
+   *   "rule": {
+   *     "type": "provider_stability",
+   *     "threshold": 0.5,
+   *     "action": "reroute"
+   *   }
+   * }
+   */
+  private async handlePolicyRules(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    const body = await this.readBody(req)
+    const payload = JSON.parse(body)
+
+    if (!payload.tenantId || !payload.rule) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'tenantId and rule are required' }))
+      return
+    }
+
+    // Validate rule type
+    const validRuleTypes = ['provider_stability', 'entropy_limit', 'minimum_convergence', 'canonical_path_protection']
+    if (!validRuleTypes.includes(payload.rule.type)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: `Invalid rule type. Must be one of: ${validRuleTypes.join(', ')}` 
+      }))
+      return
+    }
+
+    // Add rule to policy store
+    await this.policyStore.addRule(payload.tenantId, payload.rule)
+
+    res.writeHead(201, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      message: 'Policy rule created',
+      tenantId: payload.tenantId,
+      rule: payload.rule
+    }))
   }
 
   /**
