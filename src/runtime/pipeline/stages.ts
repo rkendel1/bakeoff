@@ -3,6 +3,15 @@ import type { EventStore } from '../../store/event-store.js'
 import type { StateStore } from '../../store/state-store.js'
 import type { Executor } from '../executor.js'
 import { evaluateTransition } from '../evaluator.js'
+import { getTimestamp } from '../context/execution-context.js'
+
+/**
+ * Helper to get the first (and typically only) matched transition.
+ * The runtime currently operates on a single transition per event.
+ */
+function getMatchedTransition(ctx: ExecutionContext) {
+  return ctx.transitions[0]
+}
 
 /**
  * INGEST stage - Receives and logs the incoming event
@@ -15,7 +24,7 @@ export function createIngestStage(eventStore: EventStore) {
     
     ctx.trace.push({
       stage: 'ingest',
-      timestamp: new Date().toISOString(),
+      timestamp: getTimestamp(),
       metadata: { eventType: ctx.event.type }
     })
     
@@ -55,7 +64,7 @@ export function createEvaluateStage(stateStore: StateStore, initialState: string
     
     ctx.trace.push({
       stage: 'evaluate',
-      timestamp: new Date().toISOString(),
+      timestamp: getTimestamp(),
       metadata: { transitionFound: !!transition }
     })
     
@@ -71,13 +80,13 @@ export function createPlanStage() {
     if (ctx.transitions.length === 0) {
       ctx.trace.push({
         stage: 'plan',
-        timestamp: new Date().toISOString(),
+        timestamp: getTimestamp(),
         metadata: { actionsPlanned: 0 }
       })
       return ctx
     }
     
-    const transition = ctx.transitions[0]
+    const transition = getMatchedTransition(ctx)
     
     for (const actionName of transition.actions) {
       const actionDef = ctx.model.actions.find((a) => a.name === actionName)
@@ -91,7 +100,7 @@ export function createPlanStage() {
     
     ctx.trace.push({
       stage: 'plan',
-      timestamp: new Date().toISOString(),
+      timestamp: getTimestamp(),
       metadata: { actionsPlanned: ctx.plannedActions.length }
     })
     
@@ -107,13 +116,13 @@ export function createExecuteStage(executor: Executor) {
     if (ctx.transitions.length === 0) {
       ctx.trace.push({
         stage: 'execute',
-        timestamp: new Date().toISOString(),
+        timestamp: getTimestamp(),
         metadata: { actionsExecuted: 0 }
       })
       return ctx
     }
     
-    const transition = ctx.transitions[0]
+    const transition = getMatchedTransition(ctx)
     
     const followUpEvents = await executor.execute({
       model: ctx.model,
@@ -125,7 +134,7 @@ export function createExecuteStage(executor: Executor) {
     
     ctx.trace.push({
       stage: 'execute',
-      timestamp: new Date().toISOString(),
+      timestamp: getTimestamp(),
       metadata: { actionsExecuted: transition.actions.length, followUpEvents: followUpEvents.length }
     })
     
@@ -141,13 +150,13 @@ export function createApplyStage(stateStore: StateStore) {
     if (ctx.transitions.length === 0) {
       ctx.trace.push({
         stage: 'apply',
-        timestamp: new Date().toISOString(),
+        timestamp: getTimestamp(),
         metadata: { stateUpdated: false }
       })
       return ctx
     }
     
-    const transition = ctx.transitions[0]
+    const transition = getMatchedTransition(ctx)
     
     stateStore.set(ctx.entityId, transition.toState)
     
@@ -156,7 +165,7 @@ export function createApplyStage(stateStore: StateStore) {
       fromState: transition.fromState,
       toState: transition.toState,
       eventType: ctx.event.type,
-      timestamp: new Date().toISOString()
+      timestamp: getTimestamp()
     }
     
     stateStore.appendHistory(stateUpdate)
@@ -169,7 +178,7 @@ export function createApplyStage(stateStore: StateStore) {
     
     ctx.trace.push({
       stage: 'apply',
-      timestamp: new Date().toISOString(),
+      timestamp: getTimestamp(),
       metadata: { stateUpdated: true, newState: transition.toState }
     })
     
@@ -184,7 +193,7 @@ export function createEmitStage() {
   return async (ctx: ExecutionContext): Promise<ExecutionContext> => {
     ctx.trace.push({
       stage: 'emit',
-      timestamp: new Date().toISOString(),
+      timestamp: getTimestamp(),
       metadata: { eventsEmitted: ctx.emittedEvents.length }
     })
     

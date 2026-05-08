@@ -58,7 +58,7 @@ export class RuntimeEngine {
       entityType: event.entityType,
       event,
       model: this.model,
-      currentState: '',
+      currentState: undefined, // Set during EVALUATE stage
       transitions: [],
       plannedActions: [],
       emittedEvents: [],

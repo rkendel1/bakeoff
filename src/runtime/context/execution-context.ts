@@ -30,7 +30,7 @@ export type ExecutionContext = {
   event: RuntimeEvent
 
   model: TenantModel
-  currentState: RuntimeState
+  currentState?: RuntimeState
 
   transitions: Transition[]
   plannedActions: PlannedAction[]
@@ -39,4 +39,11 @@ export type ExecutionContext = {
   stateUpdates: StateUpdate[]
 
   trace: ExecutionTrace[]
+}
+
+/**
+ * Helper function to generate ISO timestamp for trace entries
+ */
+export function getTimestamp(): string {
+  return new Date().toISOString()
 }
