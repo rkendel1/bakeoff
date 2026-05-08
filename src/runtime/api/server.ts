@@ -14,6 +14,8 @@ import type { ExecutionStore } from '../store/execution-store.js'
 import { CanonicalInferenceEngine } from '../intelligence/CanonicalInferenceEngine.js'
 import { DriftFromCanonicalAnalyzer } from '../intelligence/DriftFromCanonicalAnalyzer.js'
 import { OperationalTopologyStore } from '../store/OperationalTopologyStore.js'
+import { RecommendationEngine } from '../intelligence/recommendation/RecommendationEngine.js'
+import { RecommendationStore } from '../intelligence/recommendation/RecommendationStore.js'
 
 /**
  * ControlPlaneServer - HTTP API server for the runtime control plane
@@ -39,6 +41,8 @@ export class ControlPlaneServer {
   private inferenceEngine: CanonicalInferenceEngine
   private driftAnalyzer: DriftFromCanonicalAnalyzer
   private topologyStore: OperationalTopologyStore
+  private recommendationEngine: RecommendationEngine
+  private recommendationStore: RecommendationStore
 
   constructor(
     private readonly registry: TenantRuntimeRegistry,
@@ -55,6 +59,8 @@ export class ControlPlaneServer {
     this.inferenceEngine = new CanonicalInferenceEngine()
     this.driftAnalyzer = new DriftFromCanonicalAnalyzer()
     this.topologyStore = new OperationalTopologyStore()
+    this.recommendationEngine = new RecommendationEngine(this.topologyStore)
+    this.recommendationStore = new RecommendationStore()
   }
 
   /**
@@ -122,6 +128,12 @@ export class ControlPlaneServer {
         await this.handleIntelligenceDrift(req, res, url)
       } else if (req.method === 'GET' && pathname === '/intelligence/topology') {
         await this.handleIntelligenceTopology(req, res, url)
+      } else if (req.method === 'GET' && pathname === '/intelligence/recommendations') {
+        await this.handleIntelligenceRecommendations(req, res, url)
+      } else if (req.method === 'GET' && pathname === '/intelligence/convergence') {
+        await this.handleIntelligenceConvergence(req, res, url)
+      } else if (req.method === 'POST' && pathname === '/intelligence/model-patch') {
+        await this.handleIntelligenceModelPatch(req, res)
       } else {
         res.writeHead(404, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Not found' }))
@@ -666,6 +678,149 @@ export class ControlPlaneServer {
       evolutionMetrics,
       snapshotHistory
     }))
+  }
+
+  /**
+   * GET /intelligence/recommendations?tenantId=<id>
+   * 
+   * Returns ranked runtime recommendations
+   */
+  private async handleIntelligenceRecommendations(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+    
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'tenantId query parameter is required' }))
+      return
+    }
+
+    // Get tenant model
+    const model = this.registry.getModel(tenantId)
+    if (!model) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: `Tenant ${tenantId} not found` }))
+      return
+    }
+
+    // Get execution history
+    const executions = await this.executionStore.listByTenant(tenantId)
+
+    // Generate drift analysis
+    const driftAnalysis = this.driftAnalyzer.analyzeDrift(
+      tenantId,
+      model,
+      executions
+    )
+
+    // Generate topology snapshot
+    const topologySnapshot = this.inferenceEngine.generateTopologySnapshot(
+      tenantId,
+      executions
+    )
+
+    // Generate recommendations
+    const recommendations = await this.recommendationEngine.generateRecommendations(
+      tenantId,
+      model,
+      executions,
+      driftAnalysis,
+      topologySnapshot,
+      this.executionQueue
+    )
+
+    // Store recommendations
+    await this.recommendationStore.storeRecommendations(tenantId, recommendations)
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ recommendations }))
+  }
+
+  /**
+   * GET /intelligence/convergence?tenantId=<id>
+   * 
+   * Returns operational convergence metrics
+   */
+  private async handleIntelligenceConvergence(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    const tenantId = url.searchParams.get('tenantId')
+    
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'tenantId query parameter is required' }))
+      return
+    }
+
+    // Get execution history
+    const executions = await this.executionStore.listByTenant(tenantId)
+
+    // Analyze convergence
+    const convergence = await this.recommendationEngine['convergenceAnalyzer'].analyzeConvergence(
+      tenantId,
+      executions
+    )
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(convergence))
+  }
+
+  /**
+   * POST /intelligence/model-patch
+   * 
+   * Returns suggested canonical model patch set
+   * 
+   * Body:
+   * {
+   *   "tenantId": "tenant-1"
+   * }
+   */
+  private async handleIntelligenceModelPatch(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    const body = await this.readBody(req)
+    const { tenantId } = JSON.parse(body)
+
+    if (!tenantId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'tenantId is required in request body' }))
+      return
+    }
+
+    // Get tenant model
+    const model = this.registry.getModel(tenantId)
+    if (!model) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: `Tenant ${tenantId} not found` }))
+      return
+    }
+
+    // Get execution history
+    const executions = await this.executionStore.listByTenant(tenantId)
+
+    // Generate drift analysis
+    const driftAnalysis = this.driftAnalyzer.analyzeDrift(
+      tenantId,
+      model,
+      executions
+    )
+
+    // Generate model patches
+    const patchSet = this.recommendationEngine['patchGenerator'].generatePatchSet(
+      tenantId,
+      model,
+      executions,
+      driftAnalysis
+    )
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(patchSet))
   }
 
   /**
