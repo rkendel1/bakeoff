@@ -56,7 +56,7 @@ export class BakeoffReasoningContextBuilder {
 
     const nodes: GraphNode[] = [...related]
       .map((id) => nodesById.get(id))
-      .filter((node): node is GraphNode => Boolean(node))
+      .filter((node): node is GraphNode => node !== undefined)
 
     const edges: GraphEdge[] = snapshot.graph.edges.filter((edge) =>
       related.has(edge.from) && related.has(edge.to)

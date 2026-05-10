@@ -131,5 +131,8 @@ test('Trace integrity: reasoning trace is reconstructable from recorded steps', 
 
   assert.ok(trace.queryId.startsWith('generateHypotheses:'))
   assert.equal(trace.kernelSnapshotVersion, 'snapshot-v1')
+  assert.ok(trace.reasoningSteps.includes('hypothesis:root:form.2'))
+  assert.ok(trace.reasoningSteps.includes('hypothesis:root:provider.auth'))
+  assert.ok(trace.reasoningSteps.includes('hypothesis:degradation-cluster'))
   assert.deepEqual(traversedFromSteps, visited)
 })

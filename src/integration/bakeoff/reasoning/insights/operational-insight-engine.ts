@@ -19,7 +19,7 @@ export class OperationalInsightEngine {
       traceEngine?.step('insight:root-causes')
       insights.push({
         title: 'Root causes identified',
-        description: `Detected ${causalExplanation.rootCauses.length} root cause node(s) with confidence ${causalExplanation.confidence.toFixed(2)}.`,
+        description: `Detected ${causalExplanation.rootCauses.length} root cause node(s) with confidence ${causalExplanation.confidence.toFixed(4)}.`,
         severity: causalExplanation.confidence >= 0.75 ? 'high' : 'medium',
         evidenceNodes: causalExplanation.rootCauses.map((node) => node.id).sort((a, b) => a.localeCompare(b))
       })

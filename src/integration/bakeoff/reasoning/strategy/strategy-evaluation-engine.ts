@@ -24,10 +24,11 @@ export class StrategyEvaluationEngine {
       }
     }
 
-    const allScores = context.graph.nodes.map((node) => node.score ?? 0.5)
-    const avgScore = allScores.length === 0
+    const avgScore = context.graph.nodes.length === 0
       ? 0.5
-      : allScores.reduce((sum, score) => sum + score, 0) / allScores.length
+      : context.graph.nodes
+        .map((node) => node.score ?? 0.5)
+        .reduce((sum, score) => sum + score, 0) / context.graph.nodes.length
 
     return {
       strategyId,

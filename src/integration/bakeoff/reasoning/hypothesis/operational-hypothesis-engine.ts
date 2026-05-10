@@ -48,6 +48,14 @@ export class OperationalHypothesisEngine {
       })
     }
 
-    return hypotheses.sort((a, b) => b.confidence - a.confidence || b.causalStrength - a.causalStrength)
+    return hypotheses.sort((a, b) => {
+      if (a.confidence !== b.confidence) {
+        return a.confidence > b.confidence ? -1 : 1
+      }
+      if (a.causalStrength !== b.causalStrength) {
+        return a.causalStrength > b.causalStrength ? -1 : 1
+      }
+      return a.statement.localeCompare(b.statement)
+    })
   }
 }

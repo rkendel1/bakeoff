@@ -53,7 +53,12 @@ export class CrossCapabilityDependencyAnalyzer {
 
     return {
       criticalPaths: criticalPaths
-        .sort((a, b) => b.score - a.score || b.nodes.length - a.nodes.length)
+        .sort((a, b) => {
+          if (a.score !== b.score) {
+            return b.score - a.score
+          }
+          return b.nodes.length - a.nodes.length
+        })
         .slice(0, 5),
       riskNodes,
       dependencyDepth: maxDepth

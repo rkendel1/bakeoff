@@ -17,11 +17,13 @@ export class CausalReasoningEngine {
 
     const visited = new Set<string>()
     const queue: string[] = [failedNodeId]
+    let queueIndex = 0
     const causalEdges: GraphEdge[] = []
     const rootCauseIds = new Set<string>()
 
-    while (queue.length > 0) {
-      const nodeId = queue.shift()
+    while (queueIndex < queue.length) {
+      const nodeId = queue[queueIndex]
+      queueIndex += 1
       if (!nodeId || visited.has(nodeId)) continue
 
       visited.add(nodeId)
