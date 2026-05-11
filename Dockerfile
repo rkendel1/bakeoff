@@ -15,10 +15,10 @@ RUN npm ci
 COPY . .
 
 # Clone tokens extractor runtime dependency used by /site-requests endpoint
-# Pin to main branch commit 9fbcea4fc76de3baa1cae0a1fcff86f5f61d1d0b that includes dependency installation fix.
+# Pin to main branch commit 9fbcea4492af3624530005479e7dc48db0991195 that includes dependency installation fix.
 RUN git clone https://github.com/rkendel1/tokens.git /opt/tokens \
   && cd /opt/tokens \
-  && git checkout 9fbcea4fc76de3baa1cae0a1fcff86f5f61d1d0b \
+  && git checkout 9fbcea4492af3624530005479e7dc48db0991195 \
   && npm ci --omit=dev
 ENV TOKENS_CLI_PATH=/opt/tokens/index.js
 # tokens uses Playwright; sandbox can be disabled in containerized environments when needed.
