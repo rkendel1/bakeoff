@@ -83,6 +83,11 @@ type SiteProcessingRequest = {
   error?: string
 }
 
+const DEFAULT_TOKENS_CLI_PATH = '/opt/tokens/index.js'
+const MAX_SITE_RESPONSE_BODY_CHARS = 200_000
+const MAX_TOKENS_PROCESS_OUTPUT_CHARS = 1_000_000
+const MAX_SITE_URL_LENGTH = 2048
+
 /**
  * ControlPlaneServer - HTTP API server for the runtime control plane
  * 
@@ -847,6 +852,10 @@ export class ControlPlaneServer {
   }
 
   private normalizeHttpUrl(rawUrl: string): string | null {
+    if (!rawUrl || rawUrl.length > MAX_SITE_URL_LENGTH || /[\r\n\t]/.test(rawUrl)) {
+      return null
+    }
+
     try {
       const parsed = new URL(rawUrl)
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -859,7 +868,7 @@ export class ControlPlaneServer {
   }
 
   private async defaultSiteProcessor(url: string): Promise<unknown> {
-    const tokensCliPath = process.env.TOKENS_CLI_PATH || '/opt/tokens/index.js'
+    const tokensCliPath = process.env.TOKENS_CLI_PATH || DEFAULT_TOKENS_CLI_PATH
     if (existsSync(tokensCliPath)) {
       try {
         return await this.processWithTokensCli(tokensCliPath, url)
@@ -875,6 +884,11 @@ export class ControlPlaneServer {
   }
 
   private async processWithTokensCli(tokensCliPath: string, url: string): Promise<unknown> {
+    const cliArgs = [tokensCliPath, url, '--json-only']
+    if (process.env.TOKENS_NO_SANDBOX === 'true') {
+      cliArgs.push('--no-sandbox')
+    }
+
     const { stdout, stderr, exitCode } = await new Promise<{
       stdout: string
       stderr: string
@@ -882,21 +896,47 @@ export class ControlPlaneServer {
     }>((resolve, reject) => {
       const child = spawn(
         process.execPath,
-        [tokensCliPath, url, '--json-only', '--no-sandbox'],
+        cliArgs,
         { env: process.env }
       )
 
       let stdout = ''
       let stderr = ''
+      let settled = false
+
+      const fail = (message: string) => {
+        if (settled) {
+          return
+        }
+        settled = true
+        child.kill()
+        reject(new Error(message))
+      }
 
       child.stdout.on('data', (chunk) => {
         stdout += chunk.toString()
+        if (stdout.length > MAX_TOKENS_PROCESS_OUTPUT_CHARS) {
+          fail('tokens extractor output exceeded maximum allowed size')
+        }
       })
       child.stderr.on('data', (chunk) => {
         stderr += chunk.toString()
+        if (stderr.length > MAX_TOKENS_PROCESS_OUTPUT_CHARS) {
+          fail('tokens extractor error output exceeded maximum allowed size')
+        }
       })
-      child.on('error', reject)
+      child.on('error', (error) => {
+        if (settled) {
+          return
+        }
+        settled = true
+        reject(error)
+      })
       child.on('close', (code) => {
+        if (settled) {
+          return
+        }
+        settled = true
         resolve({ stdout, stderr, exitCode: code ?? 1 })
       })
     })
@@ -942,7 +982,7 @@ export class ControlPlaneServer {
   private async processWithBasicSiteFetch(url: string): Promise<unknown> {
     const response = await fetch(url)
     const contentType = response.headers.get('content-type') || ''
-    const body = (await response.text()).slice(0, 200_000)
+    const body = (await response.text()).slice(0, MAX_SITE_RESPONSE_BODY_CHARS)
 
     const title = this.matchHtmlTagContent(body, 'title')
     const description = this.matchMetaDescription(body)

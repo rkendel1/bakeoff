@@ -339,6 +339,8 @@ curl http://localhost:3000/site-requests/9abce2af-52f7-4c59-89dd-2f7a7ef5a6fa
 
 If `callbackUrl` is provided, the runtime sends a POST notification to that URL when processing completes (success or failure), including `requestId`, `status`, and result/error payload.
 
+> Note: request tracking is currently in-memory, so request state does not persist across service restarts.
+
 ## Usage Example
 
 See `src/examples/api-demo.ts` for a complete working example.

@@ -16,6 +16,8 @@ import { demoTenant } from '../tenants/demo-tenant.js'
 import { DurableExecutionQueue } from '../runtime/queue/durable-execution-queue.js'
 import { RuntimeWorker } from '../runtime/worker/runtime-worker.js'
 
+const SITE_REQUEST_TIMEOUT_MS = 2000
+
 /**
  * Helper function to wait for the worker queue to be empty
  * Polls the worker status until queue is empty or timeout is reached
@@ -40,7 +42,7 @@ async function waitForQueueEmpty(
 async function waitForSiteRequestCompletion(
   baseUrl: string,
   requestId: string,
-  timeoutMs: number = 2000
+  timeoutMs: number = SITE_REQUEST_TIMEOUT_MS
 ): Promise<any> {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
@@ -590,7 +592,7 @@ test('ControlPlaneServer: site request callback is notified on completion', asyn
     const submitted = await submitResponse.json()
     const callbackPayload = await Promise.race([
       callbackPayloadPromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('callback timeout')), 2000))
+      new Promise((_, reject) => setTimeout(() => reject(new Error('callback timeout')), SITE_REQUEST_TIMEOUT_MS))
     ])
 
     assert.equal(callbackPayload.requestId, submitted.requestId)
