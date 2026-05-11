@@ -15,6 +15,7 @@ import { DocuSealAdapter } from '../adapters/docuseal-adapter.js'
 import { demoTenant } from '../tenants/demo-tenant.js'
 import { DurableExecutionQueue } from '../runtime/queue/durable-execution-queue.js'
 import { RuntimeWorker } from '../runtime/worker/runtime-worker.js'
+import { SiteJobQueue } from '../runtime/site-processing/site-job-queue.js'
 
 const SITE_REQUEST_TIMEOUT_MS = 2000
 
@@ -151,8 +152,9 @@ test('ControlPlaneServer: POST /events ingests event', async () => {
   // Create execution queue and worker
   const executionQueue = new DurableExecutionQueue()
   const worker = new RuntimeWorker(executionQueue, engines)
+  const siteJobQueue = new SiteJobQueue()
   
-  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore)
+  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore, siteJobQueue)
   await server.start(3001)
   
   // Start worker
@@ -228,8 +230,9 @@ test('ControlPlaneServer: GET /executions queries executions', async () => {
   
   // Create execution queue (not needed for this test, but required by server)
   const executionQueue = new DurableExecutionQueue()
+  const siteJobQueue = new SiteJobQueue()
   
-  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore)
+  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore, siteJobQueue)
   await server.start(3002)
   
   try {
@@ -285,8 +288,9 @@ test('ControlPlaneServer: GET /executions/:id inspects execution', async () => {
   
   // Create execution queue (not needed for this test, but required by server)
   const executionQueue = new DurableExecutionQueue()
+  const siteJobQueue = new SiteJobQueue()
   
-  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore)
+  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore, siteJobQueue)
   await server.start(3003)
   
   try {
@@ -315,8 +319,9 @@ test('ControlPlaneServer: POST /simulate simulates execution', async () => {
   
   // Create execution queue (not needed for this test, but required by server)
   const executionQueue = new DurableExecutionQueue()
+  const siteJobQueue = new SiteJobQueue()
   
-  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore)
+  const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore, siteJobQueue)
   await server.start(3004)
   
   try {
@@ -371,6 +376,7 @@ test('ControlPlaneServer: runtime API key blocks unauthenticated requests', asyn
   const query = new ExecutionQuery(executionStore)
   const inspector = new RuntimeInspector()
   const executionQueue = new DurableExecutionQueue()
+  const siteJobQueue = new SiteJobQueue()
   const server = new ControlPlaneServer(
     registry,
     engines,
@@ -378,6 +384,7 @@ test('ControlPlaneServer: runtime API key blocks unauthenticated requests', asyn
     inspector,
     executionQueue,
     executionStore,
+    siteJobQueue,
     'test-runtime-api-key'
   )
   await server.start(3005)
@@ -427,6 +434,7 @@ test('ControlPlaneServer: runtime API key allows authenticated requests', async 
   const query = new ExecutionQuery(executionStore)
   const inspector = new RuntimeInspector()
   const executionQueue = new DurableExecutionQueue()
+  const siteJobQueue = new SiteJobQueue()
   const server = new ControlPlaneServer(
     registry,
     engines,
@@ -434,6 +442,7 @@ test('ControlPlaneServer: runtime API key allows authenticated requests', async 
     inspector,
     executionQueue,
     executionStore,
+    siteJobQueue,
     'test-runtime-api-key'
   )
   await server.start(3006)
@@ -463,6 +472,7 @@ test('ControlPlaneServer: POST /site-requests returns request ID and completed s
   const query = new ExecutionQuery(executionStore)
   const inspector = new RuntimeInspector()
   const executionQueue = new DurableExecutionQueue()
+  const siteJobQueue = new SiteJobQueue()
   const server = new ControlPlaneServer(
     registry,
     new Map(),
@@ -470,13 +480,20 @@ test('ControlPlaneServer: POST /site-requests returns request ID and completed s
     inspector,
     executionQueue,
     executionStore,
-    undefined,
-    async (url: string) => ({
-      source: 'mock',
-      url,
-      title: 'Mock Site'
-    })
+    siteJobQueue
   )
+  
+  // Create site processing worker with mock processor
+  const { SiteProcessingWorker } = await import('../runtime/site-processing/site-processing-worker.js')
+  const mockProcessor = async (url: string) => ({
+    source: 'mock',
+    url,
+    title: 'Mock Site'
+  })
+  const noopNotifier = async () => {}
+  const siteWorker = new SiteProcessingWorker(siteJobQueue, mockProcessor, noopNotifier)
+  siteWorker.start()
+  
   await server.start(3007)
 
   try {
@@ -503,6 +520,7 @@ test('ControlPlaneServer: POST /site-requests returns request ID and completed s
     assert.equal(statusBody.result.source, 'mock')
     assert.equal(statusBody.result.url, 'https://example.com/')
   } finally {
+    siteWorker.stop()
     await server.stop()
   }
 })
@@ -513,13 +531,15 @@ test('ControlPlaneServer: POST /site-requests rejects invalid url', async () => 
   const query = new ExecutionQuery(executionStore)
   const inspector = new RuntimeInspector()
   const executionQueue = new DurableExecutionQueue()
+  const siteJobQueue = new SiteJobQueue()
   const server = new ControlPlaneServer(
     registry,
     new Map(),
     query,
     inspector,
     executionQueue,
-    executionStore
+    executionStore,
+    siteJobQueue
   )
   await server.start(3008)
 
@@ -566,6 +586,7 @@ test('ControlPlaneServer: site request callback is notified on completion', asyn
   const query = new ExecutionQuery(executionStore)
   const inspector = new RuntimeInspector()
   const executionQueue = new DurableExecutionQueue()
+  const siteJobQueue = new SiteJobQueue()
   const server = new ControlPlaneServer(
     registry,
     new Map(),
@@ -573,9 +594,36 @@ test('ControlPlaneServer: site request callback is notified on completion', asyn
     inspector,
     executionQueue,
     executionStore,
-    undefined,
-    async (url: string) => ({ url, source: 'callback-mock' })
+    siteJobQueue
   )
+  
+  // Create site processing worker with mock processor and real callback notifier
+  const { SiteProcessingWorker } = await import('../runtime/site-processing/site-processing-worker.js')
+  const mockProcessor = async (url: string) => ({ url, source: 'callback-mock' })
+  const callbackNotifier = async (job: any) => {
+    if (!job.callbackUrl) return
+    try {
+      await fetch(job.callbackUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId: job.requestId,
+          url: job.url,
+          status: job.status,
+          submittedAt: job.createdAt.toISOString(),
+          startedAt: job.startedAt?.toISOString(),
+          completedAt: job.completedAt?.toISOString(),
+          result: job.result,
+          error: job.lastError
+        })
+      })
+    } catch (error) {
+      console.warn('Callback notification failed', error)
+    }
+  }
+  const siteWorker = new SiteProcessingWorker(siteJobQueue, mockProcessor, callbackNotifier)
+  siteWorker.start()
+  
   await server.start(3009)
 
   try {
@@ -599,6 +647,7 @@ test('ControlPlaneServer: site request callback is notified on completion', asyn
     assert.equal(callbackPayload.status, 'completed')
     assert.equal(callbackPayload.result.source, 'callback-mock')
   } finally {
+    siteWorker.stop()
     await server.stop()
   }
 })

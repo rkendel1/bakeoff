@@ -17,6 +17,7 @@ import { DocuSealAdapter } from '../adapters/docuseal-adapter.js'
 import { ExecutionQuery } from '../runtime/control-plane/execution-query.js'
 import { RuntimeInspector } from '../runtime/control-plane/inspector.js'
 import { DurableExecutionQueue } from '../runtime/queue/durable-execution-queue.js'
+import { SiteJobQueue } from '../runtime/site-processing/site-job-queue.js'
 
 describe('Behavioral Diff + Migration Analysis', () => {
   // Define test models
@@ -477,8 +478,9 @@ describe('Behavioral Diff + Migration Analysis', () => {
       const query = new ExecutionQuery(executionStore)
       const inspector = new RuntimeInspector()
       const executionQueue = new DurableExecutionQueue()
+      const siteJobQueue = new SiteJobQueue()
 
-      server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore)
+      server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore, siteJobQueue)
       await server.start(3100)
     })
 

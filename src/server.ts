@@ -26,6 +26,10 @@ import { TenantRuntimeRegistry } from "./runtime/registry/tenant-registry.js"
 import { ControlPlaneServer } from "./runtime/api/server.js"
 import { DurableExecutionQueue } from "./runtime/queue/durable-execution-queue.js"
 import { RuntimeWorker } from "./runtime/worker/runtime-worker.js"
+import { SiteJobQueue } from "./runtime/site-processing/site-job-queue.js"
+import { SiteProcessingWorker } from "./runtime/site-processing/site-processing-worker.js"
+import { defaultSiteProcessor } from "./runtime/site-processing/site-processor.js"
+import type { SiteJob } from "./runtime/site-processing/site-job-queue.js"
 
 console.log('[bakeoff-runtime-core] initializing...')
 
@@ -59,6 +63,48 @@ worker.start()
 
 console.log('[bakeoff-runtime-core] worker started')
 
+// Site processing infrastructure
+const siteJobQueue = new SiteJobQueue()
+
+// Callback notifier for site processing jobs
+const notifySiteJobCallback = async (job: SiteJob): Promise<void> => {
+  if (!job.callbackUrl) {
+    return
+  }
+
+  try {
+    await fetch(job.callbackUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId: job.requestId,
+        url: job.url,
+        status: job.status,
+        submittedAt: job.createdAt.toISOString(),
+        startedAt: job.startedAt?.toISOString(),
+        completedAt: job.completedAt?.toISOString(),
+        result: job.result,
+        error: job.lastError
+      })
+    })
+  } catch (error) {
+    console.warn('[site-worker] Failed to notify callback', {
+      requestId: job.requestId,
+      callbackUrl: job.callbackUrl,
+      error: error instanceof Error ? error.message : String(error)
+    })
+  }
+}
+
+const siteWorker = new SiteProcessingWorker(
+  siteJobQueue,
+  defaultSiteProcessor,
+  notifySiteJobCallback
+)
+siteWorker.start()
+
+console.log('[bakeoff-runtime-core] site processing worker started')
+
 const query = new ExecutionQuery(executionStore)
 const inspector = new RuntimeInspector()
 const server = new ControlPlaneServer(
@@ -67,7 +113,8 @@ const server = new ControlPlaneServer(
   query,
   inspector,
   executionQueue,
-  executionStore
+  executionStore,
+  siteJobQueue
 )
 
 const port = parseInt(process.env.PORT || '8080', 10)
@@ -87,9 +134,12 @@ console.log('  - And all other runtime-core contract v1 endpoints')
 const shutdown = async (signal: string) => {
   console.log(`[bakeoff-runtime-core] ${signal} received, shutting down gracefully`)
   
-  // Stop worker first to prevent new work from being processed
+  // Stop workers first to prevent new work from being processed
   worker.stop()
   console.log('[bakeoff-runtime-core] worker stopped')
+  
+  siteWorker.stop()
+  console.log('[bakeoff-runtime-core] site processing worker stopped')
   
   // Then stop the server
   await server.stop()

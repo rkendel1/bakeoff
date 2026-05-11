@@ -1,7 +1,5 @@
 import http from 'node:http'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { spawn } from 'node:child_process'
 import type { RuntimeEvent } from '../../models/event.js'
 import type { RuntimeEngine } from '../engine.js'
 import type { ExecutionQuery } from '../control-plane/execution-query.js'
@@ -66,26 +64,8 @@ import type {
   IntelligenceLearningRequest,
   IntelligenceRecommendationRequest
 } from './contract-types.js'
+import type { SiteJobQueue } from '../site-processing/site-job-queue.js'
 
-type SiteProcessingStatus = 'queued' | 'processing' | 'completed' | 'failed'
-
-type SiteProcessor = (url: string) => Promise<unknown>
-
-type SiteProcessingRequest = {
-  requestId: string
-  url: string
-  callbackUrl?: string
-  status: SiteProcessingStatus
-  submittedAt: string
-  startedAt?: string
-  completedAt?: string
-  result?: unknown
-  error?: string
-}
-
-const DEFAULT_TOKENS_CLI_PATH = '/opt/tokens/index.js'
-const MAX_SITE_RESPONSE_BODY_CHARS = 200_000
-const MAX_TOKENS_PROCESS_OUTPUT_CHARS = 1_000_000
 const MAX_SITE_URL_LENGTH = 2048
 
 /**
@@ -163,8 +143,6 @@ export class ControlPlaneServer {
 
   // Runtime-Core Contract v1 Handler
   private contractHandler: RuntimeCoreContractHandler
-  private readonly siteProcessingRequests = new Map<string, SiteProcessingRequest>()
-  private readonly siteProcessor: SiteProcessor
 
   constructor(
     private readonly registry: TenantRuntimeRegistry,
@@ -173,12 +151,11 @@ export class ControlPlaneServer {
     private readonly inspector: RuntimeInspector,
     private readonly executionQueue: DurableExecutionQueue,
     private readonly executionStore: ExecutionStore,
-    runtimeApiKey?: string,
-    siteProcessor?: SiteProcessor
+    private readonly siteJobQueue: SiteJobQueue,
+    runtimeApiKey?: string
   ) {
     this.server = http.createServer(this.handleRequest.bind(this))
     this.runtimeApiKey = (runtimeApiKey ?? process.env.RUNTIME_API_KEY)?.trim() || null
-    this.siteProcessor = siteProcessor ?? this.defaultSiteProcessor.bind(this)
     this.diffEngine = new BehavioralDiffEngine()
     this.compatibilityAnalyzer = new CompatibilityAnalyzer()
     this.migrationSimulator = new MigrationSimulator()
@@ -742,22 +719,15 @@ export class ControlPlaneServer {
     }
 
     const requestId = randomUUID()
-    const request: SiteProcessingRequest = {
-      requestId,
-      url: normalizedUrl,
-      callbackUrl: normalizedCallbackUrl,
-      status: 'queued',
-      submittedAt: new Date().toISOString()
-    }
-
-    this.siteProcessingRequests.set(requestId, request)
-    void this.processSiteRequest(requestId)
+    
+    // Enqueue the job in the SiteJobQueue
+    this.siteJobQueue.enqueue(requestId, normalizedUrl, normalizedCallbackUrl)
 
     res.writeHead(202, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({
       requestId,
-      status: request.status,
-      submittedAt: request.submittedAt,
+      status: 'queued',
+      submittedAt: new Date().toISOString(),
       statusEndpoint: `/site-requests/${requestId}`
     }))
   }
@@ -778,8 +748,8 @@ export class ControlPlaneServer {
       return
     }
 
-    const request = this.siteProcessingRequests.get(requestId)
-    if (!request) {
+    const job = this.siteJobQueue.getByRequestId(requestId)
+    if (!job) {
       res.writeHead(404, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ error: 'Request not found' }))
       return
@@ -787,68 +757,15 @@ export class ControlPlaneServer {
 
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({
-      requestId: request.requestId,
-      url: request.url,
-      status: request.status,
-      submittedAt: request.submittedAt,
-      startedAt: request.startedAt,
-      completedAt: request.completedAt,
-      result: request.result,
-      error: request.error
+      requestId: job.requestId,
+      url: job.url,
+      status: job.status,
+      submittedAt: job.createdAt.toISOString(),
+      startedAt: job.startedAt?.toISOString(),
+      completedAt: job.completedAt?.toISOString(),
+      result: job.result,
+      error: job.lastError
     }))
-  }
-
-  private async processSiteRequest(requestId: string): Promise<void> {
-    const request = this.siteProcessingRequests.get(requestId)
-    if (!request) {
-      return
-    }
-
-    request.status = 'processing'
-    request.startedAt = new Date().toISOString()
-
-    try {
-      request.result = await this.siteProcessor(request.url)
-      request.status = 'completed'
-      request.completedAt = new Date().toISOString()
-    } catch (error) {
-      request.status = 'failed'
-      request.completedAt = new Date().toISOString()
-      request.error = error instanceof Error ? error.message : 'Site processing failed'
-    }
-
-    if (request.callbackUrl) {
-      void this.notifySiteRequestCallback(request)
-    }
-  }
-
-  private async notifySiteRequestCallback(request: SiteProcessingRequest): Promise<void> {
-    if (!request.callbackUrl) {
-      return
-    }
-
-    try {
-      await fetch(request.callbackUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requestId: request.requestId,
-          url: request.url,
-          status: request.status,
-          submittedAt: request.submittedAt,
-          startedAt: request.startedAt,
-          completedAt: request.completedAt,
-          result: request.result,
-          error: request.error
-        })
-      })
-    } catch (error) {
-      console.warn('Failed to notify site processing callback', {
-        requestId: request.requestId,
-        callbackUrl: request.callbackUrl,
-        error: error instanceof Error ? error.message : String(error)
-      })
-    }
   }
 
   private normalizeHttpUrl(rawUrl: string): string | null {
@@ -865,148 +782,6 @@ export class ControlPlaneServer {
     } catch {
       return null
     }
-  }
-
-  private async defaultSiteProcessor(url: string): Promise<unknown> {
-    const tokensCliPath = process.env.TOKENS_CLI_PATH || DEFAULT_TOKENS_CLI_PATH
-    if (existsSync(tokensCliPath)) {
-      try {
-        return await this.processWithTokensCli(tokensCliPath, url)
-      } catch (error) {
-        console.warn('tokens extractor unavailable, falling back to basic fetch', {
-          url,
-          error: error instanceof Error ? error.message : String(error)
-        })
-      }
-    }
-
-    return this.processWithBasicSiteFetch(url)
-  }
-
-  private async processWithTokensCli(tokensCliPath: string, url: string): Promise<unknown> {
-    const cliArgs = [tokensCliPath, url, '--json-only']
-    if (process.env.TOKENS_NO_SANDBOX === 'true') {
-      cliArgs.push('--no-sandbox')
-    }
-
-    const { stdout, stderr, exitCode } = await new Promise<{
-      stdout: string
-      stderr: string
-      exitCode: number
-    }>((resolve, reject) => {
-      const child = spawn(
-        process.execPath,
-        cliArgs,
-        { env: process.env }
-      )
-
-      let stdout = ''
-      let stderr = ''
-      let settled = false
-
-      const fail = (message: string) => {
-        if (settled) {
-          return
-        }
-        settled = true
-        child.kill()
-        reject(new Error(message))
-      }
-
-      child.stdout.on('data', (chunk) => {
-        stdout += chunk.toString()
-        if (stdout.length > MAX_TOKENS_PROCESS_OUTPUT_CHARS) {
-          fail('tokens extractor output exceeded maximum allowed size')
-        }
-      })
-      child.stderr.on('data', (chunk) => {
-        stderr += chunk.toString()
-        if (stderr.length > MAX_TOKENS_PROCESS_OUTPUT_CHARS) {
-          fail('tokens extractor error output exceeded maximum allowed size')
-        }
-      })
-      child.on('error', (error) => {
-        if (settled) {
-          return
-        }
-        settled = true
-        reject(error)
-      })
-      child.on('close', (code) => {
-        if (settled) {
-          return
-        }
-        settled = true
-        resolve({ stdout, stderr, exitCode: code ?? 1 })
-      })
-    })
-
-    if (exitCode !== 0) {
-      throw new Error(
-        `tokens extractor failed (exit=${exitCode}): ${stderr.trim() || 'unknown error'}`
-      )
-    }
-
-    const parsed = this.parseJsonFromOutput(stdout)
-    if (parsed === null) {
-      throw new Error('tokens extractor returned non-JSON output')
-    }
-
-    return parsed
-  }
-
-  private parseJsonFromOutput(output: string): unknown | null {
-    const trimmed = output.trim()
-    if (!trimmed) {
-      return null
-    }
-
-    try {
-      return JSON.parse(trimmed)
-    } catch {
-      const firstBrace = trimmed.indexOf('{')
-      const lastBrace = trimmed.lastIndexOf('}')
-
-      if (firstBrace >= 0 && lastBrace > firstBrace) {
-        const candidate = trimmed.slice(firstBrace, lastBrace + 1)
-        try {
-          return JSON.parse(candidate)
-        } catch {
-          return null
-        }
-      }
-      return null
-    }
-  }
-
-  private async processWithBasicSiteFetch(url: string): Promise<unknown> {
-    const response = await fetch(url)
-    const contentType = response.headers.get('content-type') || ''
-    const body = (await response.text()).slice(0, MAX_SITE_RESPONSE_BODY_CHARS)
-
-    const title = this.matchHtmlTagContent(body, 'title')
-    const description = this.matchMetaDescription(body)
-
-    return {
-      source: 'basic-fetch',
-      url: response.url,
-      statusCode: response.status,
-      contentType,
-      title,
-      description
-    }
-  }
-
-  private matchHtmlTagContent(html: string, tagName: string): string | null {
-    const match = html.match(new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i'))
-    return match?.[1]?.trim() || null
-  }
-
-  private matchMetaDescription(html: string): string | null {
-    const match = html.match(
-      /<meta[^>]+name=['"]description['"][^>]*content=['"]([^'"]+)['"][^>]*>/i
-    )
-    return match?.[1]?.trim() || null
   }
 
   /**
