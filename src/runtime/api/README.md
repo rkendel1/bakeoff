@@ -288,6 +288,57 @@ curl -X POST http://localhost:3000/simulate \
 - `200 OK` - Simulation successful
 - `404 Not Found` - Model version not found
 
+### 5. POST /site-requests and GET /site-requests/:requestId - Async Site Processing
+
+Submit a URL for asynchronous site processing and track completion by request ID.
+
+**Submit Request:**
+
+```bash
+curl -X POST http://localhost:3000/site-requests \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "callbackUrl": "https://requestor.example.com/webhooks/site-processing"
+  }'
+```
+
+**Submit Response (`202 Accepted`):**
+
+```json
+{
+  "requestId": "9abce2af-52f7-4c59-89dd-2f7a7ef5a6fa",
+  "status": "queued",
+  "submittedAt": "2026-01-01T00:00:00.000Z",
+  "statusEndpoint": "/site-requests/9abce2af-52f7-4c59-89dd-2f7a7ef5a6fa"
+}
+```
+
+**Check Status:**
+
+```bash
+curl http://localhost:3000/site-requests/9abce2af-52f7-4c59-89dd-2f7a7ef5a6fa
+```
+
+**Status Response (`200 OK`):**
+
+```json
+{
+  "requestId": "9abce2af-52f7-4c59-89dd-2f7a7ef5a6fa",
+  "url": "https://example.com/",
+  "status": "completed",
+  "submittedAt": "2026-01-01T00:00:00.000Z",
+  "startedAt": "2026-01-01T00:00:00.200Z",
+  "completedAt": "2026-01-01T00:00:01.450Z",
+  "result": {
+    "source": "basic-fetch",
+    "title": "Example Domain"
+  }
+}
+```
+
+If `callbackUrl` is provided, the runtime sends a POST notification to that URL when processing completes (success or failure), including `requestId`, `status`, and result/error payload.
+
 ## Usage Example
 
 See `src/examples/api-demo.ts` for a complete working example.

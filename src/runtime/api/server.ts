@@ -1,5 +1,7 @@
 import http from 'node:http'
-import { timingSafeEqual } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import type { RuntimeEvent } from '../../models/event.js'
 import type { RuntimeEngine } from '../engine.js'
 import type { ExecutionQuery } from '../control-plane/execution-query.js'
@@ -64,6 +66,22 @@ import type {
   IntelligenceLearningRequest,
   IntelligenceRecommendationRequest
 } from './contract-types.js'
+
+type SiteProcessingStatus = 'queued' | 'processing' | 'completed' | 'failed'
+
+type SiteProcessor = (url: string) => Promise<unknown>
+
+type SiteProcessingRequest = {
+  requestId: string
+  url: string
+  callbackUrl?: string
+  status: SiteProcessingStatus
+  submittedAt: string
+  startedAt?: string
+  completedAt?: string
+  result?: unknown
+  error?: string
+}
 
 /**
  * ControlPlaneServer - HTTP API server for the runtime control plane
@@ -140,6 +158,8 @@ export class ControlPlaneServer {
 
   // Runtime-Core Contract v1 Handler
   private contractHandler: RuntimeCoreContractHandler
+  private readonly siteProcessingRequests = new Map<string, SiteProcessingRequest>()
+  private readonly siteProcessor: SiteProcessor
 
   constructor(
     private readonly registry: TenantRuntimeRegistry,
@@ -148,10 +168,12 @@ export class ControlPlaneServer {
     private readonly inspector: RuntimeInspector,
     private readonly executionQueue: DurableExecutionQueue,
     private readonly executionStore: ExecutionStore,
-    runtimeApiKey?: string
+    runtimeApiKey?: string,
+    siteProcessor?: SiteProcessor
   ) {
     this.server = http.createServer(this.handleRequest.bind(this))
     this.runtimeApiKey = (runtimeApiKey ?? process.env.RUNTIME_API_KEY)?.trim() || null
+    this.siteProcessor = siteProcessor ?? this.defaultSiteProcessor.bind(this)
     this.diffEngine = new BehavioralDiffEngine()
     this.compatibilityAnalyzer = new CompatibilityAnalyzer()
     this.migrationSimulator = new MigrationSimulator()
@@ -351,6 +373,7 @@ export class ControlPlaneServer {
             health: 'GET /health',
             events: 'POST /events',
             executions: 'GET /executions',
+            siteRequests: 'POST /site-requests, GET /site-requests/{requestId}',
             intent: 'POST /runtime/v1/intent',
             intelligence: 'GET /intelligence/*',
             policy: 'POST /policy/*',
@@ -377,6 +400,10 @@ export class ControlPlaneServer {
         await this.handleInspectExecution(req, res, pathname)
       } else if (req.method === 'POST' && pathname === '/simulate') {
         await this.handleSimulate(req, res)
+      } else if (req.method === 'POST' && pathname === '/site-requests') {
+        await this.handleCreateSiteRequest(req, res)
+      } else if (req.method === 'GET' && pathname.startsWith('/site-requests/')) {
+        await this.handleSiteRequestStatus(req, res, pathname)
       } else if (req.method === 'GET' && pathname === '/models/diff') {
         await this.handleModelDiff(req, res, url)
       } else if (req.method === 'POST' && pathname === '/models/simulate-migration') {
@@ -657,6 +684,289 @@ export class ControlPlaneServer {
 
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ simulation }))
+  }
+
+  /**
+   * POST /site-requests - Queue asynchronous website processing by URL
+   *
+   * Body:
+   * {
+   *   "url": "https://example.com",
+   *   "callbackUrl": "https://requestor.example.com/webhooks/site-processing" // optional
+   * }
+   */
+  private async handleCreateSiteRequest(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    let payload: { url?: string, callbackUrl?: string }
+    try {
+      const body = await this.readBody(req)
+      payload = JSON.parse(body)
+    } catch (error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({
+        error: error instanceof Error && error.message === 'Request body too large'
+          ? 'Request body too large'
+          : 'Invalid JSON in request body'
+      }))
+      return
+    }
+
+    if (!payload.url) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Missing required field: url' }))
+      return
+    }
+
+    const normalizedUrl = this.normalizeHttpUrl(payload.url)
+    if (!normalizedUrl) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Invalid url. Only http/https URLs are supported' }))
+      return
+    }
+
+    const normalizedCallbackUrl = payload.callbackUrl
+      ? this.normalizeHttpUrl(payload.callbackUrl) || undefined
+      : undefined
+
+    if (payload.callbackUrl && !normalizedCallbackUrl) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Invalid callbackUrl. Only http/https URLs are supported' }))
+      return
+    }
+
+    const requestId = randomUUID()
+    const request: SiteProcessingRequest = {
+      requestId,
+      url: normalizedUrl,
+      callbackUrl: normalizedCallbackUrl,
+      status: 'queued',
+      submittedAt: new Date().toISOString()
+    }
+
+    this.siteProcessingRequests.set(requestId, request)
+    void this.processSiteRequest(requestId)
+
+    res.writeHead(202, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      requestId,
+      status: request.status,
+      submittedAt: request.submittedAt,
+      statusEndpoint: `/site-requests/${requestId}`
+    }))
+  }
+
+  /**
+   * GET /site-requests/{requestId} - Get asynchronous site processing status
+   */
+  private async handleSiteRequestStatus(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    pathname: string
+  ): Promise<void> {
+    const requestId = pathname.split('/')[2]
+
+    if (!requestId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Request ID required' }))
+      return
+    }
+
+    const request = this.siteProcessingRequests.get(requestId)
+    if (!request) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Request not found' }))
+      return
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      requestId: request.requestId,
+      url: request.url,
+      status: request.status,
+      submittedAt: request.submittedAt,
+      startedAt: request.startedAt,
+      completedAt: request.completedAt,
+      result: request.result,
+      error: request.error
+    }))
+  }
+
+  private async processSiteRequest(requestId: string): Promise<void> {
+    const request = this.siteProcessingRequests.get(requestId)
+    if (!request) {
+      return
+    }
+
+    request.status = 'processing'
+    request.startedAt = new Date().toISOString()
+
+    try {
+      request.result = await this.siteProcessor(request.url)
+      request.status = 'completed'
+      request.completedAt = new Date().toISOString()
+    } catch (error) {
+      request.status = 'failed'
+      request.completedAt = new Date().toISOString()
+      request.error = error instanceof Error ? error.message : 'Site processing failed'
+    }
+
+    if (request.callbackUrl) {
+      void this.notifySiteRequestCallback(request)
+    }
+  }
+
+  private async notifySiteRequestCallback(request: SiteProcessingRequest): Promise<void> {
+    if (!request.callbackUrl) {
+      return
+    }
+
+    try {
+      await fetch(request.callbackUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId: request.requestId,
+          url: request.url,
+          status: request.status,
+          submittedAt: request.submittedAt,
+          startedAt: request.startedAt,
+          completedAt: request.completedAt,
+          result: request.result,
+          error: request.error
+        })
+      })
+    } catch (error) {
+      console.warn('Failed to notify site processing callback', {
+        requestId: request.requestId,
+        callbackUrl: request.callbackUrl,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    }
+  }
+
+  private normalizeHttpUrl(rawUrl: string): string | null {
+    try {
+      const parsed = new URL(rawUrl)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return null
+      }
+      return parsed.toString()
+    } catch {
+      return null
+    }
+  }
+
+  private async defaultSiteProcessor(url: string): Promise<unknown> {
+    const tokensCliPath = process.env.TOKENS_CLI_PATH || '/opt/tokens/index.js'
+    if (existsSync(tokensCliPath)) {
+      try {
+        return await this.processWithTokensCli(tokensCliPath, url)
+      } catch (error) {
+        console.warn('tokens extractor unavailable, falling back to basic fetch', {
+          url,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
+    }
+
+    return this.processWithBasicSiteFetch(url)
+  }
+
+  private async processWithTokensCli(tokensCliPath: string, url: string): Promise<unknown> {
+    const { stdout, stderr, exitCode } = await new Promise<{
+      stdout: string
+      stderr: string
+      exitCode: number
+    }>((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [tokensCliPath, url, '--json-only', '--no-sandbox'],
+        { env: process.env }
+      )
+
+      let stdout = ''
+      let stderr = ''
+
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk.toString()
+      })
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk.toString()
+      })
+      child.on('error', reject)
+      child.on('close', (code) => {
+        resolve({ stdout, stderr, exitCode: code ?? 1 })
+      })
+    })
+
+    if (exitCode !== 0) {
+      throw new Error(
+        `tokens extractor failed (exit=${exitCode}): ${stderr.trim() || 'unknown error'}`
+      )
+    }
+
+    const parsed = this.parseJsonFromOutput(stdout)
+    if (parsed === null) {
+      throw new Error('tokens extractor returned non-JSON output')
+    }
+
+    return parsed
+  }
+
+  private parseJsonFromOutput(output: string): unknown | null {
+    const trimmed = output.trim()
+    if (!trimmed) {
+      return null
+    }
+
+    try {
+      return JSON.parse(trimmed)
+    } catch {
+      const firstBrace = trimmed.indexOf('{')
+      const lastBrace = trimmed.lastIndexOf('}')
+
+      if (firstBrace >= 0 && lastBrace > firstBrace) {
+        const candidate = trimmed.slice(firstBrace, lastBrace + 1)
+        try {
+          return JSON.parse(candidate)
+        } catch {
+          return null
+        }
+      }
+      return null
+    }
+  }
+
+  private async processWithBasicSiteFetch(url: string): Promise<unknown> {
+    const response = await fetch(url)
+    const contentType = response.headers.get('content-type') || ''
+    const body = (await response.text()).slice(0, 200_000)
+
+    const title = this.matchHtmlTagContent(body, 'title')
+    const description = this.matchMetaDescription(body)
+
+    return {
+      source: 'basic-fetch',
+      url: response.url,
+      statusCode: response.status,
+      contentType,
+      title,
+      description
+    }
+  }
+
+  private matchHtmlTagContent(html: string, tagName: string): string | null {
+    const match = html.match(new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i'))
+    return match?.[1]?.trim() || null
+  }
+
+  private matchMetaDescription(html: string): string | null {
+    const match = html.match(
+      /<meta[^>]+name=['"]description['"][^>]*content=['"]([^'"]+)['"][^>]*>/i
+    )
+    return match?.[1]?.trim() || null
   }
 
   /**

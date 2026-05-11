@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import http from 'node:http'
 import { TenantRuntimeRegistry } from '../runtime/registry/tenant-registry.js'
 import { ControlPlaneServer } from '../runtime/api/server.js'
 import { RuntimeEngine } from '../runtime/engine.js'
@@ -34,6 +35,26 @@ async function waitForQueueEmpty(
   }
   
   throw new Error('Timeout waiting for queue to be empty')
+}
+
+async function waitForSiteRequestCompletion(
+  baseUrl: string,
+  requestId: string,
+  timeoutMs: number = 2000
+): Promise<any> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const response = await fetch(`${baseUrl}/site-requests/${requestId}`)
+    const body = await response.json()
+
+    if (body.status === 'completed' || body.status === 'failed') {
+      return body
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+
+  throw new Error('Timed out waiting for site request completion')
 }
 
 // --- TenantRuntimeRegistry Tests ---
@@ -429,6 +450,152 @@ test('ControlPlaneServer: runtime API key allows authenticated requests', async 
     const result = await response.json()
     assert.ok(result.executions)
     assert.ok(result.executions.length > 0)
+  } finally {
+    await server.stop()
+  }
+})
+
+test('ControlPlaneServer: POST /site-requests returns request ID and completed status', async () => {
+  const registry = new TenantRuntimeRegistry()
+  const executionStore = new ExecutionStore()
+  const query = new ExecutionQuery(executionStore)
+  const inspector = new RuntimeInspector()
+  const executionQueue = new DurableExecutionQueue()
+  const server = new ControlPlaneServer(
+    registry,
+    new Map(),
+    query,
+    inspector,
+    executionQueue,
+    executionStore,
+    undefined,
+    async (url: string) => ({
+      source: 'mock',
+      url,
+      title: 'Mock Site'
+    })
+  )
+  await server.start(3007)
+
+  try {
+    const submitResponse = await fetch('http://localhost:3007/site-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: 'https://example.com'
+      })
+    })
+
+    assert.equal(submitResponse.status, 202)
+    const submitted = await submitResponse.json()
+    assert.ok(submitted.requestId)
+    assert.ok(['queued', 'processing', 'completed'].includes(submitted.status))
+
+    const statusBody = await waitForSiteRequestCompletion(
+      'http://localhost:3007',
+      submitted.requestId
+    )
+
+    assert.equal(statusBody.requestId, submitted.requestId)
+    assert.equal(statusBody.status, 'completed')
+    assert.equal(statusBody.result.source, 'mock')
+    assert.equal(statusBody.result.url, 'https://example.com/')
+  } finally {
+    await server.stop()
+  }
+})
+
+test('ControlPlaneServer: POST /site-requests rejects invalid url', async () => {
+  const registry = new TenantRuntimeRegistry()
+  const executionStore = new ExecutionStore()
+  const query = new ExecutionQuery(executionStore)
+  const inspector = new RuntimeInspector()
+  const executionQueue = new DurableExecutionQueue()
+  const server = new ControlPlaneServer(
+    registry,
+    new Map(),
+    query,
+    inspector,
+    executionQueue,
+    executionStore
+  )
+  await server.start(3008)
+
+  try {
+    const response = await fetch('http://localhost:3008/site-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: 'file:///etc/passwd' })
+    })
+
+    assert.equal(response.status, 400)
+    const body = await response.json()
+    assert.equal(body.error, 'Invalid url. Only http/https URLs are supported')
+  } finally {
+    await server.stop()
+  }
+})
+
+test('ControlPlaneServer: site request callback is notified on completion', async () => {
+  const callbackPayloadPromise = new Promise<any>((resolve) => {
+    const callbackServer = http.createServer(async (req, res) => {
+      if (req.method === 'POST' && req.url === '/callback') {
+        let body = ''
+        req.on('data', (chunk) => {
+          body += chunk.toString()
+        })
+        req.on('end', () => {
+          res.writeHead(204)
+          res.end()
+          resolve(JSON.parse(body))
+          callbackServer.close()
+        })
+      } else {
+        res.writeHead(404)
+        res.end()
+      }
+    })
+
+    callbackServer.listen(3010)
+  })
+
+  const registry = new TenantRuntimeRegistry()
+  const executionStore = new ExecutionStore()
+  const query = new ExecutionQuery(executionStore)
+  const inspector = new RuntimeInspector()
+  const executionQueue = new DurableExecutionQueue()
+  const server = new ControlPlaneServer(
+    registry,
+    new Map(),
+    query,
+    inspector,
+    executionQueue,
+    executionStore,
+    undefined,
+    async (url: string) => ({ url, source: 'callback-mock' })
+  )
+  await server.start(3009)
+
+  try {
+    const submitResponse = await fetch('http://localhost:3009/site-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: 'https://example.com',
+        callbackUrl: 'http://localhost:3010/callback'
+      })
+    })
+
+    assert.equal(submitResponse.status, 202)
+    const submitted = await submitResponse.json()
+    const callbackPayload = await Promise.race([
+      callbackPayloadPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('callback timeout')), 2000))
+    ])
+
+    assert.equal(callbackPayload.requestId, submitted.requestId)
+    assert.equal(callbackPayload.status, 'completed')
+    assert.equal(callbackPayload.result.source, 'callback-mock')
   } finally {
     await server.stop()
   }
