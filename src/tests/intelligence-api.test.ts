@@ -12,6 +12,7 @@ import { Executor } from '../runtime/executor.js'
 import { Dispatcher } from '../runtime/dispatcher.js'
 import { DurableExecutionQueue } from '../runtime/queue/durable-execution-queue.js'
 import { RuntimeWorker } from '../runtime/worker/runtime-worker.js'
+import { SiteJobQueue } from '../runtime/site-processing/site-job-queue.js'
 import { demoTenant } from '../tenants/demo-tenant.js'
 
 async function waitForQueueEmpty(
@@ -55,6 +56,7 @@ test('Intelligence API: GET /intelligence/canonical returns topology snapshot', 
   const worker = new RuntimeWorker(queue, engines, 50)
   const executionQuery = new ExecutionQuery(executionStore)
   const inspector = new RuntimeInspector()
+  const siteJobQueue = new SiteJobQueue()
 
   const server = new ControlPlaneServer(
     registry,
@@ -62,7 +64,8 @@ test('Intelligence API: GET /intelligence/canonical returns topology snapshot', 
     executionQuery,
     inspector,
     queue,
-    executionStore
+    executionStore,
+    siteJobQueue
   )
 
   await server.start(3010)
@@ -129,6 +132,7 @@ test('Intelligence API: GET /intelligence/drift returns drift analysis', async (
   const worker = new RuntimeWorker(queue, engines, 50)
   const executionQuery = new ExecutionQuery(executionStore)
   const inspector = new RuntimeInspector()
+  const siteJobQueue = new SiteJobQueue()
 
   const server = new ControlPlaneServer(
     registry,
@@ -136,7 +140,8 @@ test('Intelligence API: GET /intelligence/drift returns drift analysis', async (
     executionQuery,
     inspector,
     queue,
-    executionStore
+    executionStore,
+    siteJobQueue
   )
 
   await server.start(3011)
@@ -197,6 +202,7 @@ test('Intelligence API: GET /intelligence/topology returns topology evolution', 
   const worker = new RuntimeWorker(queue, engines, 50)
   const executionQuery = new ExecutionQuery(executionStore)
   const inspector = new RuntimeInspector()
+  const siteJobQueue = new SiteJobQueue()
 
   const server = new ControlPlaneServer(
     registry,
@@ -204,7 +210,8 @@ test('Intelligence API: GET /intelligence/topology returns topology evolution', 
     executionQuery,
     inspector,
     queue,
-    executionStore
+    executionStore,
+    siteJobQueue
   )
 
   await server.start(3012)
@@ -250,6 +257,7 @@ test('Intelligence API: handles missing tenantId parameter', async () => {
   const queue = new DurableExecutionQueue()
   const executionQuery = new ExecutionQuery(executionStore)
   const inspector = new RuntimeInspector()
+  const siteJobQueue = new SiteJobQueue()
 
   const server = new ControlPlaneServer(
     registry,
@@ -257,7 +265,8 @@ test('Intelligence API: handles missing tenantId parameter', async () => {
     executionQuery,
     inspector,
     queue,
-    executionStore
+    executionStore,
+    siteJobQueue
   )
 
   await server.start(3013)

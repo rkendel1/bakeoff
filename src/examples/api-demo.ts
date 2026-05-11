@@ -27,6 +27,7 @@ import { TenantRuntimeRegistry } from '../runtime/registry/tenant-registry.js'
 import { ControlPlaneServer } from '../runtime/api/server.js'
 import { DurableExecutionQueue } from '../runtime/queue/durable-execution-queue.js'
 import { RuntimeWorker } from '../runtime/worker/runtime-worker.js'
+import { SiteJobQueue } from '../runtime/site-processing/site-job-queue.js'
 
 console.log('=== Control Plane API Demo ===\n')
 
@@ -69,7 +70,8 @@ console.log('   ✓ Runtime worker started\n')
 console.log('4. Starting Control Plane API Server')
 const query = new ExecutionQuery(executionStore)
 const inspector = new RuntimeInspector()
-const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore)
+const siteJobQueue = new SiteJobQueue()
+const server = new ControlPlaneServer(registry, engines, query, inspector, executionQueue, executionStore, siteJobQueue)
 
 const PORT = 3000
 await server.start(PORT)
