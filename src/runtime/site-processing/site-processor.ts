@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 
 const DEFAULT_TOKENS_CLI_PATH = '/opt/tokens/index.js'
 const MAX_TOKENS_PROCESS_OUTPUT_CHARS = 1_000_000
-const MAX_SITE_RESPONSE_BODY_CHARS = 1_000_000
+const MAX_SITE_RESPONSE_BODY_CHARS = 200_000
 
 /**
  * Default site processor that uses either tokens CLI or basic fetch

@@ -16,6 +16,7 @@ import { demoTenant } from '../tenants/demo-tenant.js'
 import { DurableExecutionQueue } from '../runtime/queue/durable-execution-queue.js'
 import { RuntimeWorker } from '../runtime/worker/runtime-worker.js'
 import { SiteJobQueue } from '../runtime/site-processing/site-job-queue.js'
+import { SiteProcessingWorker } from '../runtime/site-processing/site-processing-worker.js'
 
 const SITE_REQUEST_TIMEOUT_MS = 2000
 
@@ -484,7 +485,6 @@ test('ControlPlaneServer: POST /site-requests returns request ID and completed s
   )
   
   // Create site processing worker with mock processor
-  const { SiteProcessingWorker } = await import('../runtime/site-processing/site-processing-worker.js')
   const mockProcessor = async (url: string) => ({
     source: 'mock',
     url,
@@ -598,7 +598,6 @@ test('ControlPlaneServer: site request callback is notified on completion', asyn
   )
   
   // Create site processing worker with mock processor and real callback notifier
-  const { SiteProcessingWorker } = await import('../runtime/site-processing/site-processing-worker.js')
   const mockProcessor = async (url: string) => ({ url, source: 'callback-mock' })
   const callbackNotifier = async (job: any) => {
     if (!job.callbackUrl) return
