@@ -1,0 +1,165 @@
+{
+  "onboardingTasks": [
+    {
+      "id": "onboarding-1",
+      "title": "Create First Submission",
+      "description": "Submit data using your form to see the submission workflow in action",
+      "category": "onboarding",
+      "priority": "medium",
+      "guide": {
+        "title": "How to Create Your First Submission",
+        "description": "Learn how to submit data using your custom form and track its progress through the workflow.",
+        "estimatedTimeMinutes": 5,
+        "steps": [
+          {
+            "stepNumber": 1,
+            "title": "Navigate to Submissions",
+            "description": "Click on the 'Submissions' tab in the top navigation bar to access the submissions page.",
+            "actionUrl": "/submissions"
+          },
+          {
+            "stepNumber": 2,
+            "title": "Click 'New Submission'",
+            "description": "Look for the 'New Submission' button in the top-right corner and click it to open the submission form."
+          },
+          {
+            "stepNumber": 3,
+            "title": "Fill Out the Form",
+            "description": "Complete all required fields in the submission form. Required fields are marked with an asterisk (*).",
+            "tips": [
+              "Make sure all required fields are filled in",
+              "Double-check your data before submitting",
+              "You can save drafts if you need to come back later"
+            ]
+          },
+          {
+            "stepNumber": 4,
+            "title": "Submit Your Data",
+            "description": "Click the 'Submit' button at the bottom of the form to create your first submission.",
+            "tips": [
+              "You'll receive a confirmation once the submission is successful",
+              "The submission will appear in your submissions list"
+            ]
+          }
+        ]
+      },
+      "tags": ["onboarding", "submissions", "getting-started"]
+    },
+    {
+      "id": "onboarding-2",
+      "title": "Add First Form",
+      "description": "Create your first canonical form to start collecting data",
+      "category": "onboarding",
+      "priority": "medium",
+      "guide": {
+        "title": "How to Create Your First Form",
+        "description": "Learn how to build a custom form to collect the exact data you need for your workflow.",
+        "estimatedTimeMinutes": 10,
+        "steps": [
+          {
+            "stepNumber": 1,
+            "title": "Access Form Builder",
+            "description": "Navigate to the Forms section from the main menu to access the form builder.",
+            "actionUrl": "/forms"
+          },
+          {
+            "stepNumber": 2,
+            "title": "Create New Form",
+            "description": "Click 'New Form' button and enter a name and description for your form."
+          },
+          {
+            "stepNumber": 3,
+            "title": "Add Form Fields",
+            "description": "Use the form builder to add fields. Drag and drop field types from the left panel to your form.",
+            "tips": [
+              "Start with basic fields like text, email, and phone",
+              "Mark required fields appropriately",
+              "Add helpful descriptions to guide users"
+            ]
+          },
+          {
+            "stepNumber": 4,
+            "title": "Configure Field Settings",
+            "description": "Click on each field to configure validation rules, default values, and field properties."
+          },
+          {
+            "stepNumber": 5,
+            "title": "Save and Publish",
+            "description": "Save your form and publish it to make it available for submissions.",
+            "tips": [
+              "Test your form before publishing",
+              "You can always edit the form later"
+            ]
+          }
+        ]
+      },
+      "tags": ["onboarding", "forms", "getting-started"]
+    },
+    {
+      "id": "onboarding-3",
+      "title": "Setup Company Profile",
+      "description": "Define your organization identity and operational metadata",
+      "category": "onboarding",
+      "priority": "medium",
+      "guide": {
+        "title": "How to Setup Your Company Profile",
+        "description": "Configure your company information to personalize your platform experience and enable advanced features like automatic website data extraction.",
+        "estimatedTimeMinutes": 8,
+        "steps": [
+          {
+            "stepNumber": 1,
+            "title": "Navigate to Company Settings",
+            "description": "Click on 'Settings' in the top navigation, then select 'Company' from the settings menu.",
+            "actionUrl": "/settings/company"
+          },
+          {
+            "stepNumber": 2,
+            "title": "Enter Company Information",
+            "description": "Fill in your company name, description, and other basic information.",
+            "tips": [
+              "Use your official company name",
+              "Add a clear description of your business"
+            ]
+          },
+          {
+            "stepNumber": 3,
+            "title": "Add Your Company Website URL",
+            "description": "Enter your company website URL in the designated field. Our platform will automatically scan your website to extract relevant information.",
+            "tips": [
+              "Enter the full URL including https://",
+              "Make sure the URL is accessible publicly",
+              "The scan may take a few moments to complete"
+            ]
+          },
+          {
+            "stepNumber": 4,
+            "title": "Review Extracted Data",
+            "description": "Once the website scan completes, review the automatically extracted information such as company description, logo, and contact details.",
+            "tips": [
+              "You can edit any extracted information",
+              "Add missing information manually",
+              "Update information that needs correction"
+            ]
+          },
+          {
+            "stepNumber": 5,
+            "title": "Save Your Profile",
+            "description": "Click 'Save' to store your company profile. You can always update this information later.",
+            "tips": [
+              "Keep your company information up to date",
+              "Return to this page anytime to make changes"
+            ]
+          },
+          {
+            "stepNumber": 6,
+            "title": "Return to Tasks",
+            "description": "Click on the 'Tasks' button in the navigation to return to your task list and continue with onboarding.",
+            "actionUrl": "/tasks"
+          }
+        ],
+        "documentationUrl": "https://docs.opscadence.com/setup/company-profile"
+      },
+      "tags": ["onboarding", "setup", "company", "website-scan"]
+    }
+  ]
+}

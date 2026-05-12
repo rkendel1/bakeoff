@@ -65,6 +65,9 @@ import type {
   IntelligenceRecommendationRequest
 } from './contract-types.js'
 import type { SiteJobQueue } from '../site-processing/site-job-queue.js'
+import { TaskStore } from '../tasks/task-store.js'
+import { TaskInitializer } from '../tasks/task-initializer.js'
+import type { CreateTaskRequest, UpdateTaskRequest, TaskFilter } from '../tasks/task-types.js'
 
 const MAX_SITE_URL_LENGTH = 2048
 
@@ -143,6 +146,10 @@ export class ControlPlaneServer {
 
   // Runtime-Core Contract v1 Handler
   private contractHandler: RuntimeCoreContractHandler
+
+  // Task Management
+  private taskStore: TaskStore
+  private taskInitializer: TaskInitializer
 
   constructor(
     private readonly registry: TenantRuntimeRegistry,
@@ -289,6 +296,10 @@ export class ControlPlaneServer {
       this.forecastStore,
       this.strategyOutcomeStore
     )
+    
+    // Initialize Task Management
+    this.taskStore = new TaskStore()
+    this.taskInitializer = new TaskInitializer(this.taskStore)
   }
 
   /**
@@ -356,6 +367,9 @@ export class ControlPlaneServer {
             events: 'POST /events',
             executions: 'GET /executions',
             siteRequests: 'POST /site-requests, GET /site-requests/{requestId}',
+            tasks: 'GET /tasks, POST /tasks, GET /tasks/{id}, PUT /tasks/{id}, DELETE /tasks/{id}',
+            taskSummary: 'GET /tasks/summary',
+            onboarding: 'POST /onboarding/tasks/initialize',
             intent: 'POST /runtime/v1/intent',
             intelligence: 'GET /intelligence/*',
             policy: 'POST /policy/*',
@@ -460,6 +474,22 @@ export class ControlPlaneServer {
         await this.handleContractIntelligenceLearning(req, res, url)
       } else if (req.method === 'GET' && pathname === '/runtime/v1/intelligence/recommendations') {
         await this.handleContractIntelligenceRecommendations(req, res, url)
+      
+      // Task Management endpoints
+      } else if (req.method === 'GET' && pathname === '/tasks') {
+        await this.handleGetTasks(req, res, url)
+      } else if (req.method === 'POST' && pathname === '/tasks') {
+        await this.handleCreateTask(req, res)
+      } else if (req.method === 'GET' && pathname.startsWith('/tasks/') && !pathname.includes('/summary')) {
+        await this.handleGetTask(req, res, pathname)
+      } else if (req.method === 'PUT' && pathname.startsWith('/tasks/')) {
+        await this.handleUpdateTask(req, res, pathname)
+      } else if (req.method === 'DELETE' && pathname.startsWith('/tasks/')) {
+        await this.handleDeleteTask(req, res, pathname)
+      } else if (req.method === 'GET' && pathname === '/tasks/summary') {
+        await this.handleGetTaskSummary(req, res, url)
+      } else if (req.method === 'POST' && pathname === '/onboarding/tasks/initialize') {
+        await this.handleInitializeOnboardingTasks(req, res)
       
       } else {
         res.writeHead(404, { 'Content-Type': 'application/json' })
@@ -2797,6 +2827,285 @@ export class ControlPlaneServer {
           code: 'INTERNAL_ERROR', 
           message: error instanceof Error ? error.message : 'Internal error' 
         } 
+      }))
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Task Management Endpoints
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /tasks - List tasks with optional filtering
+   * 
+   * Query params:
+   * - tenantId (required)
+   * - userId (optional)
+   * - status (optional)
+   * - category (optional)
+   * - priority (optional)
+   * - assignedTo (optional)
+   */
+  private async handleGetTasks(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    try {
+      const tenantId = url.searchParams.get('tenantId')
+      if (!tenantId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Missing required parameter: tenantId' }))
+        return
+      }
+
+      const filter: TaskFilter = { tenantId }
+      
+      const userId = url.searchParams.get('userId')
+      if (userId) filter.userId = userId
+      
+      const status = url.searchParams.get('status')
+      if (status) filter.status = status as any
+      
+      const category = url.searchParams.get('category')
+      if (category) filter.category = category as any
+      
+      const priority = url.searchParams.get('priority')
+      if (priority) filter.priority = priority as any
+      
+      const assignedTo = url.searchParams.get('assignedTo')
+      if (assignedTo) filter.assignedTo = assignedTo
+
+      const tasks = this.taskStore.list(filter)
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ tasks }))
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Internal error' 
+      }))
+    }
+  }
+
+  /**
+   * POST /tasks - Create a new task
+   */
+  private async handleCreateTask(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    try {
+      const body = await this.readBody(req)
+      const request: CreateTaskRequest = JSON.parse(body)
+
+      if (!request.tenantId || !request.title || !request.description) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ 
+          error: 'Missing required fields: tenantId, title, description' 
+        }))
+        return
+      }
+
+      const task = {
+        id: randomUUID(),
+        tenantId: request.tenantId,
+        title: request.title,
+        description: request.description,
+        category: request.category,
+        priority: request.priority,
+        status: 'pending' as const,
+        assignedTo: request.assignedTo,
+        guide: request.guide,
+        tags: request.tags,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        dueDate: request.dueDate ? new Date(request.dueDate) : undefined
+      }
+
+      this.taskStore.create(task)
+      
+      res.writeHead(201, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ task }))
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Internal error' 
+      }))
+    }
+  }
+
+  /**
+   * GET /tasks/:id - Get a task by ID
+   */
+  private async handleGetTask(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    pathname: string
+  ): Promise<void> {
+    try {
+      const id = pathname.split('/')[2]
+      const task = this.taskStore.get(id)
+      
+      if (!task) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Task not found' }))
+        return
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ task }))
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Internal error' 
+      }))
+    }
+  }
+
+  /**
+   * PUT /tasks/:id - Update a task
+   */
+  private async handleUpdateTask(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    pathname: string
+  ): Promise<void> {
+    try {
+      const id = pathname.split('/')[2]
+      const body = await this.readBody(req)
+      const updates: UpdateTaskRequest = JSON.parse(body)
+
+      const task = this.taskStore.update(id, {
+        ...updates,
+        dueDate: updates.dueDate ? new Date(updates.dueDate) : undefined,
+        completedAt: updates.status === 'completed' ? new Date() : undefined
+      })
+      
+      if (!task) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Task not found' }))
+        return
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ task }))
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Internal error' 
+      }))
+    }
+  }
+
+  /**
+   * DELETE /tasks/:id - Delete a task
+   */
+  private async handleDeleteTask(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    pathname: string
+  ): Promise<void> {
+    try {
+      const id = pathname.split('/')[2]
+      const deleted = this.taskStore.delete(id)
+      
+      if (!deleted) {
+        res.writeHead(404, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Task not found' }))
+        return
+      }
+
+      res.writeHead(204)
+      res.end()
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Internal error' 
+      }))
+    }
+  }
+
+  /**
+   * GET /tasks/summary - Get task summary with counts
+   * 
+   * Query params:
+   * - tenantId (required)
+   * - userId (optional)
+   */
+  private async handleGetTaskSummary(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> {
+    try {
+      const tenantId = url.searchParams.get('tenantId')
+      if (!tenantId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Missing required parameter: tenantId' }))
+        return
+      }
+
+      const userId = url.searchParams.get('userId') || undefined
+      const summary = this.taskStore.getSummary(tenantId, userId)
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ summary }))
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Internal error' 
+      }))
+    }
+  }
+
+  /**
+   * POST /onboarding/tasks/initialize - Initialize onboarding tasks for a user
+   * 
+   * Body:
+   * {
+   *   "tenantId": "tenant-1",
+   *   "userId": "user-1"
+   * }
+   */
+  private async handleInitializeOnboardingTasks(
+    req: http.IncomingMessage,
+    res: http.ServerResponse
+  ): Promise<void> {
+    try {
+      const body = await this.readBody(req)
+      const { tenantId, userId } = JSON.parse(body)
+
+      if (!tenantId || !userId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ 
+          error: 'Missing required fields: tenantId, userId' 
+        }))
+        return
+      }
+
+      // Check if onboarding tasks already exist
+      if (this.taskInitializer.hasOnboardingTasks(tenantId, userId)) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ 
+          message: 'Onboarding tasks already exist',
+          tasks: this.taskStore.getOnboardingTasks(tenantId, userId)
+        }))
+        return
+      }
+
+      // Initialize onboarding tasks
+      const tasks = this.taskInitializer.initializeOnboardingTasks(tenantId, userId)
+      
+      res.writeHead(201, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        message: 'Onboarding tasks initialized successfully',
+        tasks 
+      }))
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Internal error' 
       }))
     }
   }
