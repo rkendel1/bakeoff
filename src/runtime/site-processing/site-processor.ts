@@ -11,14 +11,17 @@ const MAX_SITE_RESPONSE_BODY_CHARS = 200_000
 export async function defaultSiteProcessor(url: string): Promise<unknown> {
   const tokensCliPath = process.env.TOKENS_CLI_PATH || DEFAULT_TOKENS_CLI_PATH
   if (existsSync(tokensCliPath)) {
+    console.log('[site-processor] tokens CLI found, using extractor', { url, tokensCliPath })
     try {
       return await processWithTokensCli(tokensCliPath, url)
     } catch (error) {
-      console.warn('tokens extractor unavailable, falling back to basic fetch', {
+      console.warn('[site-processor] tokens extractor failed, falling back to basic fetch', {
         url,
         error: error instanceof Error ? error.message : String(error)
       })
     }
+  } else {
+    console.log('[site-processor] tokens CLI not found, using basic fetch', { url, tokensCliPath })
   }
 
   return processWithBasicSiteFetch(url)
@@ -28,10 +31,13 @@ export async function defaultSiteProcessor(url: string): Promise<unknown> {
  * Process site using tokens CLI extractor
  */
 async function processWithTokensCli(tokensCliPath: string, url: string): Promise<unknown> {
+  const startTime = Date.now()
   const cliArgs = [tokensCliPath, url, '--json-only']
   if (process.env.TOKENS_NO_SANDBOX === 'true') {
     cliArgs.push('--no-sandbox')
   }
+
+  console.log('[site-processor] starting tokens extractor', { url, args: cliArgs })
 
   const { stdout, stderr, exitCode } = await new Promise<{
     stdout: string
@@ -85,7 +91,15 @@ async function processWithTokensCli(tokensCliPath: string, url: string): Promise
     })
   })
 
+  const elapsedMs = Date.now() - startTime
+
   if (exitCode !== 0) {
+    console.error('[site-processor] tokens extractor failed', {
+      url,
+      exitCode,
+      elapsedMs,
+      stderr: stderr.slice(0, 500) // Log first 500 chars of stderr
+    })
     throw new Error(
       `tokens extractor failed (exit=${exitCode}): ${stderr.trim() || 'unknown error'}`
     )
@@ -93,8 +107,15 @@ async function processWithTokensCli(tokensCliPath: string, url: string): Promise
 
   const parsed = parseJsonFromOutput(stdout)
   if (parsed === null) {
+    console.error('[site-processor] tokens extractor returned non-JSON output', { url, elapsedMs })
     throw new Error('tokens extractor returned non-JSON output')
   }
+
+  console.log('[site-processor] tokens extractor completed successfully', {
+    url,
+    elapsedMs,
+    outputSize: stdout.length
+  })
 
   return parsed
 }
@@ -130,12 +151,26 @@ function parseJsonFromOutput(output: string): unknown | null {
  * Process site using basic fetch (fallback)
  */
 async function processWithBasicSiteFetch(url: string): Promise<unknown> {
+  const startTime = Date.now()
+  console.log('[site-processor] starting basic fetch', { url })
+
   const response = await fetch(url)
   const contentType = response.headers.get('content-type') || ''
   const body = (await response.text()).slice(0, MAX_SITE_RESPONSE_BODY_CHARS)
 
   const title = matchHtmlTagContent(body, 'title')
   const description = matchMetaDescription(body)
+
+  const elapsedMs = Date.now() - startTime
+  console.log('[site-processor] basic fetch completed', {
+    url,
+    statusCode: response.status,
+    contentType,
+    elapsedMs,
+    bodySize: body.length,
+    hasTitle: !!title,
+    hasDescription: !!description
+  })
 
   return {
     source: 'basic-fetch',
