@@ -50,8 +50,12 @@ True separation between ingestion and execution:
   - `GET /executions` - Query executions
   - `GET /executions/:id` - Inspect execution
   - `POST /simulate` - Simulate execution
+  - `POST /site-requests` - Asynchronous website scraping
+  - `GET /tasks` - Task management for onboarding and user education
 
 See [src/runtime/README.md](src/runtime/README.md) for kernel architecture and [src/runtime/api/README.md](src/runtime/api/README.md) for API documentation.
+
+See [TASK_MANAGEMENT.md](TASK_MANAGEMENT.md) for task management and onboarding API documentation.
 
 ## Key Features
 
@@ -65,6 +69,8 @@ See [src/runtime/README.md](src/runtime/README.md) for kernel architecture and [
 - **Control Plane API**: HTTP API for external event ingestion and execution querying
 - **Multi-Tenancy**: Registry-based tenant model management with versioning
 - **Observability**: Query, inspect, replay, and simulate executions
+- **Task Management**: Rich task system with step-by-step instructions, guides, and screenshots for user onboarding
+- **Site Processing**: Asynchronous website scraping with callback notifications
 
 ## Install
 
