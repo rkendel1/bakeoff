@@ -1,8 +1,40 @@
 # syntax=docker/dockerfile:1
 
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    git \
+    # Chromium core dependencies
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libatspi2.0-0 \
+    # Additional dependencies for headless browser
+    libx11-xcb1 \
+    libxcursor1 \
+    libgtk-3-0 \
+    libpangocairo-1.0-0 \
+    libcairo-gobject2 \
+    libgdk-pixbuf-2.0-0 \
+    fonts-liberation \
+    xdg-utils \
+    # Clean up to reduce image size
+    && rm -rf /var/lib/apt/lists/*
 
 # Install git so we can clone the tokens extractor repository
 RUN apk add --no-cache git
@@ -18,8 +50,17 @@ COPY . .
 # Pin to main branch commit 9fbcea4492af3624530005479e7dc48db0991195 that includes dependency installation fix.
 RUN git clone https://github.com/rkendel1/tokens.git /opt/tokens \
   && cd /opt/tokens \
-  && git checkout 9fbcea4492af3624530005479e7dc48db0991195 \
+  && git checkout main \
   && npm ci --omit=dev
+
+# Verify that browsers were installed correctly (optional but recommended)
+RUN test -n "$(find /root/.cache/ms-playwright -name 'chrome-headless-shell' -o -name 'chromium' 2>/dev/null | head -1)" || \
+    (echo "ERROR: Chromium browser not found!" && \
+     echo "Installed browsers:" && \
+     ls -la /root/.cache/ms-playwright/ 2>/dev/null || echo "No browsers found" && \
+     exit 1)
+
+  
 ENV TOKENS_CLI_PATH=/opt/tokens/index.js
 # tokens uses Playwright; sandbox can be disabled in containerized environments when needed.
 ENV TOKENS_NO_SANDBOX=true
