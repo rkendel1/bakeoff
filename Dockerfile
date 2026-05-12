@@ -36,9 +36,6 @@ RUN apt-get update && apt-get install -y \
     # Clean up to reduce image size
     && rm -rf /var/lib/apt/lists/*
 
-# Install git so we can clone the tokens extractor repository
-RUN apk add --no-cache git
-
 # Install dependencies
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -47,10 +44,8 @@ RUN npm ci
 COPY . .
 
 # Clone tokens extractor runtime dependency used by /site-requests endpoint
-# Pin to main branch commit 9fbcea4492af3624530005479e7dc48db0991195 that includes dependency installation fix.
-RUN git clone https://github.com/rkendel1/tokens.git /opt/tokens \
+RUN git clone --branch main --single-branch https://github.com/rkendel1/tokens.git /opt/tokens \
   && cd /opt/tokens \
-  && git checkout main \
   && npm ci --omit=dev
 
 # Verify that browsers were installed correctly (optional but recommended)
