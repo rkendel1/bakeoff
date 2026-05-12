@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 const DEFAULT_TOKENS_CLI_PATH = '/opt/tokens/index.js'
 const MAX_TOKENS_PROCESS_OUTPUT_CHARS = 1_000_000
 const MAX_SITE_RESPONSE_BODY_CHARS = 200_000
+const MAX_LOG_STDERR_CHARS = 500
 
 /**
  * Default site processor that uses either tokens CLI or basic fetch
@@ -98,7 +99,7 @@ async function processWithTokensCli(tokensCliPath: string, url: string): Promise
       url,
       exitCode,
       elapsedMs,
-      stderr: stderr.slice(0, 500) // Log first 500 chars of stderr
+      stderr: stderr.slice(0, MAX_LOG_STDERR_CHARS) // Log first 500 chars of stderr
     })
     throw new Error(
       `tokens extractor failed (exit=${exitCode}): ${stderr.trim() || 'unknown error'}`
