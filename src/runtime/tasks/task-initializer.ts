@@ -67,7 +67,14 @@ export class TaskInitializer {
    */
   private loadOnboardingTasksConfig(): OnboardingTasksConfig {
     try {
-      const configPath = path.join(__dirname, 'onboarding-tasks.json')
+      // Try loading from dist folder first (production)
+      let configPath = path.join(__dirname, 'onboarding-tasks.json')
+      
+      // If not found, try src folder (development)
+      if (!fs.existsSync(configPath)) {
+        configPath = path.join(__dirname, '..', '..', '..', 'src', 'runtime', 'tasks', 'onboarding-tasks.json')
+      }
+      
       const configData = fs.readFileSync(configPath, 'utf-8')
       return JSON.parse(configData) as OnboardingTasksConfig
     } catch (error) {
