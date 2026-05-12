@@ -99,7 +99,7 @@ async function processWithTokensCli(tokensCliPath: string, url: string): Promise
       url,
       exitCode,
       elapsedMs,
-      stderr: stderr.slice(0, MAX_LOG_STDERR_CHARS) // Truncate stderr for logging
+      stderr: stderr.slice(0, MAX_LOG_STDERR_CHARS) // Truncate stderr to prevent excessive log output
     })
     throw new Error(
       `tokens extractor failed (exit=${exitCode}): ${stderr.trim() || 'unknown error'}`
